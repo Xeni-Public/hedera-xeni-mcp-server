@@ -34,6 +34,7 @@
 // TODO(p4): import Mirror Node REST client (or use fetch) to query existing topics by memo
 // TODO(p4): implement idempotent state-check preamble
 
+// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await resolution of the Hedera SDK calls lands in the implementation PR (see TODO(p4) comments below).
 async function main(): Promise<void> {
   // TODO(p4): const env = requireEnv('HEDERA_ENV');
   // TODO(p4): const memo = `xeni_audit_v1_${env}`;

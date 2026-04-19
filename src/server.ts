@@ -48,6 +48,7 @@ export function loadConfig(): ServerConfig {
  *   - test: fail-open
  *   - production: fail-closed (refuse to start if private plugin missing / fails)
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await lands when the private plugin is dynamically imported (see TODO below).
 export async function loadFeeCalculator(config: ServerConfig): Promise<FeeCalculator> {
   const privatePluginsEnv = process.env['HEDERA_XENI_PRIVATE_PLUGINS']?.trim();
   const expectedImpl = process.env['EXPECTED_FEE_CALCULATOR_IMPL']?.trim();

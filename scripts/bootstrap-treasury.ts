@@ -48,6 +48,7 @@
 // TODO(p4):   Client, Hbar, PrivateKey, AccountId, AccountInfoQuery
 // TODO(p4): import Mirror Node REST client to find existing account by memo
 
+// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await resolution of the Hedera SDK calls lands in the implementation PR (see TODO(p4) comments below).
 async function main(): Promise<void> {
   // TODO(p4): const env = requireEnv('HEDERA_ENV');
   // TODO(p4): const memo = `xeni_treasury_v1_${env}`;

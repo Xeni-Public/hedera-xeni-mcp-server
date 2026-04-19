@@ -32,6 +32,7 @@ export interface TreasuryAllowanceGuardResult {
   reason?: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await lands when Mirror Node query + Slack webhook call are wired (see TODO list below).
 export async function treasuryAllowanceGuard(
   input: TreasuryAllowanceGuardInput,
 ): Promise<TreasuryAllowanceGuardResult> {
