@@ -5,7 +5,9 @@ module.exports = {
   parserOptions: {
     ecmaVersion: 2022,
     sourceType: 'module',
-    project: './tsconfig.json',
+    // Use a wider tsconfig for ESLint so test/ files are covered without
+    // also emitting them as part of `tsc -p tsconfig.json` build output.
+    project: './tsconfig.eslint.json',
   },
   plugins: ['@typescript-eslint'],
   extends: [

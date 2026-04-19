@@ -92,9 +92,13 @@ export async function loadFeeCalculator(config: ServerConfig): Promise<FeeCalcul
 /**
  * Build the HederaMCPToolkit instance. Transport-agnostic.
  */
-export async function buildToolkit(_config: ServerConfig): Promise<unknown> {
+export async function buildToolkit(config: ServerConfig): Promise<unknown> {
   const accounts = buildAccountRegistry();
-  const _feeCalculator = await loadFeeCalculator(_config);
+  // Exercise the fee-calculator loader so its fail-open/closed behavior is
+  // validated at startup. Result is intentionally discarded in this scaffold
+  // skeleton; the implementation PR captures it and threads it into the
+  // HederaMCPToolkit configuration.
+  await loadFeeCalculator(config);
 
   log.info('Account registry initialized', {
     operator: accounts.get('operator').accountId,

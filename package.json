@@ -31,10 +31,10 @@
   },
   "dependencies": {
     "@hashgraph/hedera-agent-kit": "4.0.0",
-    "@hashgraph/hedera-agent-kit-mcp": "4.0.0",
-    "@hiero-ledger/sdk": "4.0.0",
-    "@modelcontextprotocol/sdk": "1.0.0",
-    "zod": "3.23.8",
+    "@hashgraph/hedera-agent-kit-mcp": "1.0.0",
+    "@hiero-ledger/sdk": "2.81.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "3.25.76",
     "uuid": "10.0.0"
   },
   "devDependencies": {

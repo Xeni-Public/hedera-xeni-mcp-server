@@ -32,7 +32,10 @@ async function main(): Promise<void> {
     nodeEnv: config.nodeEnv,
   });
 
-  const _toolkit = await buildToolkit(config);
+  // Exercise buildToolkit so its env-parsing + fail-open/closed checks run.
+  // Toolkit instance intentionally not retained — implementation PR captures
+  // it and connects to StreamableHTTPServerTransport.
+  await buildToolkit(config);
 
   // TODO: connect the toolkit to StreamableHTTPServerTransport
   // TODO: start HTTP server bound to config.httpBind:config.httpPort

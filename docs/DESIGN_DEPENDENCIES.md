@@ -8,13 +8,16 @@ Per Lead Buddy review item 2: these three packages are **pinned to exact version
 
 Why: `hedera-agent-kit-js` v4 is bleeding edge (released 2026-04-16; v4.0.0 is ~2 days old at scaffold time). Silent minor/patch bumps could change hook lifecycle semantics or tool method names before the upstream API is settled.
 
-| Package | Pinned version | Source |
-|---|---|---|
-| `@hashgraph/hedera-agent-kit` | `4.0.0` | [GitHub](https://github.com/hashgraph/hedera-agent-kit-js) |
-| `@hashgraph/hedera-agent-kit-mcp` | `4.0.0` | Same monorepo, `packages/mcp` |
-| `@hiero-ledger/sdk` | `4.0.0` | Hedera SDK v4 (renamed from `@hashgraph/sdk`) |
+| Package | Pinned version | Source | Verified |
+|---|---|---|---|
+| `@hashgraph/hedera-agent-kit` | `4.0.0` | [GitHub](https://github.com/hashgraph/hedera-agent-kit-js) | 2026-04-19 (H-MCP-Buddy, PR #2) |
+| `@hashgraph/hedera-agent-kit-mcp` | `1.0.0` | Same monorepo, `packages/mcp` (separate version line from the main kit — note `1.0.0`, not `4.0.0`) | 2026-04-19 (H-MCP-Buddy, PR #2) |
+| `@hiero-ledger/sdk` | `2.81.0` | Successor to `@hashgraph/sdk`. Version line stayed in 2.x through the rename; `hedera-agent-kit@4.0.0` declares peer `^2.81.0` | 2026-04-19 (H-MCP-Buddy, PR #2) |
+| `@modelcontextprotocol/sdk` | `1.29.0` | Pinned to match `hedera-agent-kit-mcp@1.0.0`'s own dep to avoid double-install | 2026-04-19 (H-MCP-Buddy, PR #2) |
+| `zod` | `3.25.76` | Pinned to match `hedera-agent-kit-mcp@1.0.0`'s own dep | 2026-04-19 (H-MCP-Buddy, PR #2) |
+| `uuid` | `10.0.0` | Generic — used by `auditEnvelopeBuilder` for `event_id` | 2026-04-19 (H-MCP-Buddy, PR #2) |
 
-> **Pre-install verification:** the exact npm versions may differ slightly from the scaffold-time values above. Before first `npm install`, verify the latest published `4.0.x` on npmjs.com and update the pin accordingly. Record the verified version here, initialed by the buddy who verified.
+> **Version sync with upstream:** `@hashgraph/hedera-agent-kit-mcp@1.0.0` bundles `@modelcontextprotocol/sdk@1.29.0` + `zod@3.25.76` as direct deps. We pin to the same versions to keep the install tree deduplicated. When we bump `hedera-agent-kit-mcp`, re-check its transitive deps and align.
 
 ## Upstream features this server depends on
 
