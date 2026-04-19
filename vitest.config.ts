@@ -25,7 +25,9 @@ export default defineConfig({
       // Target end state: `include: ['src/**/*.ts']` once all 4 hooks +
       // policy + server + transports + fee calculators have their tests.
       include: [
+        'src/plugins/xeniIntentMandate/hbar.ts',
         'src/plugins/xeniIntentMandate/hooks/auditEnvelopeBuilder.ts',
+        'src/plugins/xeniIntentMandate/hooks/mandateBudgetGuard.ts',
         'src/plugins/xeniIntentMandate/hooks/spendPolicyGuard.ts',
         'src/plugins/xeniIntentMandate/policies/accountResolver.ts',
       ],
