@@ -54,7 +54,8 @@ Before requesting review:
 - [ ] Unit tests pass (`npm run test:unit`)
 - [ ] Integration tests pass (`npm run test:integration`)
 - [ ] Coverage on new hooks / policies ≥ 80% statements (§14 gate)
-- [ ] **If this PR adds tests for previously-untested files**, updated `vitest.config.ts` `coverage.include` to add those file paths. The 80% gate is maintained by narrowing scope to files under test, not by lowering thresholds — see the comment above `coverage.include` in `vitest.config.ts`.
+- [ ] If this PR adds tests for previously-untested files, updated `vitest.config.ts` `coverage.include` to add those file paths.
+  - The 80% gate is maintained by narrowing scope to files under test, not by lowering thresholds. See the comment above `coverage.include` in `vitest.config.ts`.
 - [ ] No unresolved `TODO(pN):` comments that your PR was supposed to close
 - [ ] Design doc updated if invariants, schema, or account model changed
 - [ ] New files include the `Authored-by: Anand Palanisamy - anand@xeni.com` header at the top (see existing files for per-type comment syntax)
