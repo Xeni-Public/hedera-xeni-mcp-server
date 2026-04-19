@@ -26,6 +26,7 @@ export default defineConfig({
       // policy + server + transports + fee calculators have their tests.
       include: [
         'src/plugins/xeniIntentMandate/hooks/auditEnvelopeBuilder.ts',
+        'src/plugins/xeniIntentMandate/hooks/spendPolicyGuard.ts',
         'src/plugins/xeniIntentMandate/policies/accountResolver.ts',
       ],
       exclude: ['src/**/*.d.ts', 'src/**/index.ts'],

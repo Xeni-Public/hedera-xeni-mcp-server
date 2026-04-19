@@ -29,9 +29,13 @@ function shouldLog(level: LogLevel): boolean {
 }
 
 export interface LogContext {
-  correlationId?: string;
-  tool?: string;
-  intent_id?: string;
+  // `| undefined` on optional fields is explicit per tsconfig's
+  // `exactOptionalPropertyTypes: true`. Callers often thread an
+  // optional `correlationId` from a wider context; allowing the
+  // property to hold `undefined` saves them a conditional spread.
+  correlationId?: string | undefined;
+  tool?: string | undefined;
+  intent_id?: string | undefined;
   [key: string]: unknown;
 }
 
