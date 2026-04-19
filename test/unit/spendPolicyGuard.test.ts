@@ -50,8 +50,11 @@ describe('spendPolicyGuard', () => {
       const result = spendPolicyGuard({ ...baseInput, amountHbar: 101 });
       expect(result.passed).toBe(false);
       expect(result.reason).toMatch(/exceeds/i);
-      expect(result.reason).toMatch(/101/);
-      expect(result.reason).toMatch(/100/);
+      // Assert the rejection surfaces both the requested amount and the ceiling,
+      // with the HBAR unit suffix. Structured shape check rather than a bare
+      // numeric regex (which would match substrings like 1001 or 1005 spuriously).
+      expect(result.reason).toContain('101 HBAR');
+      expect(result.reason).toContain('100 HBAR');
     });
 
     it('rejects when amount exceeds ceiling by 1 tinybar (8-decimal precision)', () => {
@@ -143,8 +146,14 @@ describe('spendPolicyGuard', () => {
       expect(result.passed).toBe(true);
     });
 
-    it('handles large HBAR amounts without precision loss (up to mainnet supply scale)', () => {
-      // Mainnet supply is ~50B HBAR = 5e9 HBAR = 5e17 tinybar, well within Number.MAX_SAFE_INTEGER (~9.0e15 — but we use BigInt so OK).
+    it('handles large HBAR amounts without precision loss (up to safe-arithmetic bound)', () => {
+      // HBAR amount is a JS `number` (float64). `Math.round(hbar * 1e8)` is
+      // exact only while `hbar * 1e8` fits within `Number.MAX_SAFE_INTEGER`
+      // (~9e15), i.e. `hbar <= ~9e7` (~90M HBAR). v1 spend ceilings are
+      // bounded far below this (refund cap is 10k HBAR/day; individual-user
+      // ceilings lower still). `BigInt` handles the *comparison* of larger
+      // integers but can't recover precision lost during the multiply.
+      // 1M HBAR here is comfortably inside the safe range (1e6 * 1e8 = 1e14).
       const result = spendPolicyGuard({
         ...baseInput,
         amountHbar: 1_000_000,
