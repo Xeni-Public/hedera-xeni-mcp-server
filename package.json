@@ -1,0 +1,83 @@
+{
+  "name": "hedera-xeni-mcp-server",
+  "version": "0.1.0-scaffold",
+  "description": "MCP server exposing Hedera HBAR payment + HCS audit tools with Xeni intent-mandate semantics. Built on @hashgraph/hedera-agent-kit v4. See docs/DESIGN.md.",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "hedera-xeni-mcp-server": "./dist/transports/stdio.js"
+  },
+  "files": [
+    "dist",
+    "scripts",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start:stdio": "node dist/transports/stdio.js",
+    "start:http": "HEDERA_TRANSPORT=http node dist/transports/http.js",
+    "bootstrap:audit-topic": "tsx scripts/bootstrap-audit-topic.ts",
+    "bootstrap:treasury": "tsx scripts/bootstrap-treasury.ts",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "test:e2e": "vitest run test/e2e",
+    "test:watch": "vitest",
+    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.ts' 'test/**/*.ts'",
+    "format": "prettier --write 'src/**/*.ts' 'scripts/**/*.ts' 'test/**/*.ts' 'docs/**/*.md'",
+    "format:check": "prettier --check 'src/**/*.ts' 'scripts/**/*.ts' 'test/**/*.ts'"
+  },
+  "dependencies": {
+    "@hashgraph/hedera-agent-kit": "4.0.0",
+    "@hashgraph/hedera-agent-kit-mcp": "4.0.0",
+    "@hiero-ledger/sdk": "4.0.0",
+    "@modelcontextprotocol/sdk": "1.0.0",
+    "zod": "3.23.8",
+    "uuid": "10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.11.0",
+    "@types/uuid": "10.0.0",
+    "@typescript-eslint/eslint-plugin": "7.2.0",
+    "@typescript-eslint/parser": "7.2.0",
+    "eslint": "8.57.0",
+    "prettier": "3.2.5",
+    "tsx": "4.7.1",
+    "typescript": "5.4.2",
+    "vitest": "1.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xeni-app/hedera-xeni-mcp-server.git"
+  },
+  "keywords": [
+    "hedera",
+    "hcs",
+    "mcp",
+    "model-context-protocol",
+    "xeni",
+    "travel",
+    "payments",
+    "hbar"
+  ],
+  "renovate": {
+    "extends": ["config:base"],
+    "packageRules": [
+      {
+        "description": "Upstream hedera-agent-kit versions are audited manually per docs/DESIGN_DEPENDENCIES.md. Renovate must not auto-bump these.",
+        "matchPackageNames": [
+          "@hashgraph/hedera-agent-kit",
+          "@hashgraph/hedera-agent-kit-mcp",
+          "@hiero-ledger/sdk"
+        ],
+        "enabled": false
+      }
+    ]
+  }
+}

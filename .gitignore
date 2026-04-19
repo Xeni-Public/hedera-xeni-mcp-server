@@ -1,0 +1,38 @@
+# Build output
+dist/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment / secrets — NEVER commit these
+.env
+.env.local
+.env.dev
+.env.testnet-ci
+.env.testnet-uat
+.env.mainnet-prod
+*.key
+*.pem
+
+# Test output
+coverage/
+.vitest/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Bootstrap script output (intentionally kept out of repo — contains account IDs per env)
+scripts/output/
