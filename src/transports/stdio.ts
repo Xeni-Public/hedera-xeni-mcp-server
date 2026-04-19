@@ -14,7 +14,10 @@ async function main(): Promise<void> {
     nodeEnv: config.nodeEnv,
   });
 
-  const _toolkit = await buildToolkit(config);
+  // Exercise buildToolkit so its env-parsing + fail-open/closed checks run.
+  // Toolkit instance intentionally not retained — implementation PR captures
+  // it and connects to StdioServerTransport.
+  await buildToolkit(config);
 
   // TODO: connect the toolkit to StdioServerTransport from @modelcontextprotocol/sdk
   // TODO: handle SIGTERM / SIGINT for clean shutdown (flush pending log lines,

@@ -36,3 +36,9 @@ yarn-debug.log*
 
 # Bootstrap script output (intentionally kept out of repo — contains account IDs per env)
 scripts/output/
+
+# Stray TS build artifacts under scripts/ (scripts are run via tsx, never compiled)
+scripts/*.js
+scripts/*.js.map
+scripts/*.d.ts
+scripts/*.d.ts.map

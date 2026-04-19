@@ -23,6 +23,6 @@
     "exactOptionalPropertyTypes": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["node_modules", "dist", "test"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test", "scripts"]
 }

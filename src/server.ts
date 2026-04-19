@@ -48,6 +48,7 @@ export function loadConfig(): ServerConfig {
  *   - test: fail-open
  *   - production: fail-closed (refuse to start if private plugin missing / fails)
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await lands when the private plugin is dynamically imported (see TODO below).
 export async function loadFeeCalculator(config: ServerConfig): Promise<FeeCalculator> {
   const privatePluginsEnv = process.env['HEDERA_XENI_PRIVATE_PLUGINS']?.trim();
   const expectedImpl = process.env['EXPECTED_FEE_CALCULATOR_IMPL']?.trim();
@@ -92,9 +93,13 @@ export async function loadFeeCalculator(config: ServerConfig): Promise<FeeCalcul
 /**
  * Build the HederaMCPToolkit instance. Transport-agnostic.
  */
-export async function buildToolkit(_config: ServerConfig): Promise<unknown> {
+export async function buildToolkit(config: ServerConfig): Promise<unknown> {
   const accounts = buildAccountRegistry();
-  const _feeCalculator = await loadFeeCalculator(_config);
+  // Exercise the fee-calculator loader so its fail-open/closed behavior is
+  // validated at startup. Result is intentionally discarded in this scaffold
+  // skeleton; the implementation PR captures it and threads it into the
+  // HederaMCPToolkit configuration.
+  await loadFeeCalculator(config);
 
   log.info('Account registry initialized', {
     operator: accounts.get('operator').accountId,
