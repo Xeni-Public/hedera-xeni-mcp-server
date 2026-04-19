@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * Reference fee calculator — PUBLIC, for dev + open-source reference.
  *

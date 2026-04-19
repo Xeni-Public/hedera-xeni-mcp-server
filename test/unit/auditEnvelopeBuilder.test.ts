@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * auditEnvelopeBuilder unit tests — the only hook with real logic landed in
  * scaffold PR. Other hooks + policies are skeleton stubs; their tests land in

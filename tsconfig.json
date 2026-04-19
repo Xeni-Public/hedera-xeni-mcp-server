@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 {
   "compilerOptions": {
     "target": "ES2022",

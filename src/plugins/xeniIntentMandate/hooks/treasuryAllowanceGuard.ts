@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * treasuryAllowanceGuard — rejects refund `transfer_hbar_with_allowance`
  * calls that would exceed the remaining treasury→agent daily allowance.

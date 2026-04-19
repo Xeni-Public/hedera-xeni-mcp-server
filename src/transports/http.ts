@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * HTTP (StreamableHTTP) transport — dev debug only.
  *

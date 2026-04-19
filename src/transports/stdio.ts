@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * stdio transport — default; AgentService spawns the server as a child process.
  *

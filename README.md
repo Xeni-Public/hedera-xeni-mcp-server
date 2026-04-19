@@ -1,3 +1,5 @@
+<!-- Authored-by: Anand Palanisamy - anand@xeni.com -->
+
 # hedera-xeni-mcp-server
 
 MCP (Model Context Protocol) server exposing Hedera HBAR payment + HCS audit tools with Xeni intent-mandate semantics. Built on top of [`@hashgraph/hedera-agent-kit`](https://github.com/hashgraph/hedera-agent-kit-js) v4.

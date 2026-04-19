@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * M3 — Create global `xeni_audit` HCS topic for a target environment.
  *

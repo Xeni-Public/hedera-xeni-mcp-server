@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 import { defineConfig } from 'vitest/config';
 
 // §14 Testing strategy — three projects, different CI cadences:

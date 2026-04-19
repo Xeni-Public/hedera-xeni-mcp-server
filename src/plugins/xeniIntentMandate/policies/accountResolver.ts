@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * accountResolver policy — picks which Hedera Client (operator or agent) to
  * use for a given tool call.

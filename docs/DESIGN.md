@@ -1,3 +1,5 @@
+<!-- Authored-by: Anand Palanisamy - anand@xeni.com -->
+
 # hedera-xeni-mcp-server — v1 Design
 
 **Status:** v1, scaffold stage. Structure + docs landed; implementation lands in subsequent PRs.

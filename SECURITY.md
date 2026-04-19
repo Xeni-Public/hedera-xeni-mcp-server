@@ -1,3 +1,5 @@
+<!-- Authored-by: Anand Palanisamy - anand@xeni.com -->
+
 # Security Policy
 
 ## Reporting a vulnerability

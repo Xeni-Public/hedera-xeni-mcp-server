@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * xeniIntentMandate plugin — exports the plugin registration for
  * HederaMCPToolkit. Zero net-new tools — just 4 hooks + 1 policy.

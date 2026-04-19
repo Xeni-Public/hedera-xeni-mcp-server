@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * Server bootstrap — wires HederaMCPToolkit with our plugin + fee-calculator
  * loader + account resolver. Called from both transports/stdio.ts and

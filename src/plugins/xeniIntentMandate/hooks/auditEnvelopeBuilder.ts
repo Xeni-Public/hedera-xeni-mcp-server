@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * auditEnvelopeBuilder — builds the HCS audit event payload from a successful
  * tool result. Runs at postCoreActionHook (only after coreAction succeeds).
