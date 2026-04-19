@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * spendPolicyGuard — rejects `approve_hbar_allowance` calls that exceed
  * the user's configured spend-policy ceiling.

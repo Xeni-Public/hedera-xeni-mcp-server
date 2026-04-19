@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * mandateBudgetGuard — rejects `transfer_hbar_with_allowance` calls that
  * would exceed the remaining budget on the user's intent mandate.

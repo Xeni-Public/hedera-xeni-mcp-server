@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * M4 — Bootstrap dedicated treasury account + initial treasury→agent refund allowance.
  *

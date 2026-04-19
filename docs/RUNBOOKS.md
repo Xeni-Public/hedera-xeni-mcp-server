@@ -1,3 +1,5 @@
+<!-- Authored-by: Anand Palanisamy - anand@xeni.com -->
+
 # Runbooks — `hedera-xeni-mcp-server`
 
 Operational procedures for ops + on-call engineers. Each section is a self-contained playbook.

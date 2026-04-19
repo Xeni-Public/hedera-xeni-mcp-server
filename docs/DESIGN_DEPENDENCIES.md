@@ -1,3 +1,5 @@
+<!-- Authored-by: Anand Palanisamy - anand@xeni.com -->
+
 # Design Dependencies
 
 Upstream features this server relies on. Breaking changes in any of these require coordinated review before we version-bump.
@@ -73,3 +75,30 @@ We have a known-good v4.0.0. If upstream goes quiet and we hit a critical bug:
 4. Revert to upstream once they respond.
 
 Never lock ourselves into a fork for convenience — only under real blockage.
+
+## Known ecosystem issues
+
+Real upstream peer-range bugs we're currently masking with install-time workarounds. Each entry tracks a workaround that should be removed once upstream fixes the underlying issue.
+
+### protobufjs peer-range mismatch
+
+**What:** `@hiero-ledger/sdk@2.81.0` bundles `protobufjs@8.0.0`, but its transitive dep `@hiero-ledger/proto@2.26.0-beta.3` declares a strict peer of `protobufjs@"7.5.4"` (exact, not caret-range). npm v7+ `npm ci` with default `strict-peer-deps` rejects this.
+
+**Workaround:** `.npmrc` in the repo root sets `legacy-peer-deps=true`, applied to both `npm install` and `npm ci`. Install tree deduplicates to ~423 packages; tests + coverage green.
+
+**First observed:** 2026-04-19 (H-MCP-Buddy, PR #2 CI failure).
+**Relevant upstream:** `@hiero-ledger/sdk` + `@hiero-ledger/proto` — file issue with Hiero once we confirm it's still present in their latest release line.
+
+**Re-verification checklist** (run on every upstream bump of `@hiero-ledger/*` or `@hashgraph/hedera-agent-kit*`):
+
+- [ ] Temporarily rename `.npmrc` → `.npmrc.disabled`.
+- [ ] `rm -rf node_modules package-lock.json`
+- [ ] `npm install` (no flags).
+- [ ] If clean (no `ERESOLVE` or peer-dep errors): delete `.npmrc.disabled` entirely, commit the removal + regenerated lockfile, add an entry to the verification log below.
+- [ ] If still broken: restore `.npmrc` (rename back), regenerate lockfile, add an entry to the verification log noting the still-broken upstream versions.
+
+**Verification log:**
+
+| Date | Verifier | Upstream versions | Still needed? | Notes |
+|---|---|---|---|---|
+| 2026-04-19 | H-MCP-Buddy | `@hashgraph/hedera-agent-kit@4.0.0`, `@hashgraph/hedera-agent-kit-mcp@1.0.0`, `@hiero-ledger/sdk@2.81.0` | Yes | Initial discovery. PR #2 CI broke without `.npmrc`; restored + committed. |

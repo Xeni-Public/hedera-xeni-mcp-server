@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 {
   "extends": "./tsconfig.json",
   "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],

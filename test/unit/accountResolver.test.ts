@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /**
  * accountResolver unit tests — covers the deterministic policy decisions per
  * DESIGN.md §6. Other hooks tested in their own files / skeleton stubs for now.

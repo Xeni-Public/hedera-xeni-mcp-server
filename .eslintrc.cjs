@@ -1,3 +1,5 @@
+// Authored-by: Anand Palanisamy - anand@xeni.com
+
 /* eslint-env node */
 module.exports = {
   root: true,
