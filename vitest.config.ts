@@ -28,6 +28,11 @@ export default defineConfig({
       // reference-impl files maintain 100% coverage — they're behavioral specs
       // for the Go port; any uncovered code is a spec-gap risk.
       include: [
+        // MCP runtime modules (tested via test/integration/ as of PR #10)
+        'src/accounts.ts',
+        'src/logger.ts',
+        'src/server.ts',
+        // reference-impl specs (behavioral contracts for AgentService Go port)
         'reference-impl/hbar.ts',
         'reference-impl/hooks/auditEnvelopeBuilder.ts',
         'reference-impl/hooks/mandateBudgetGuard.ts',

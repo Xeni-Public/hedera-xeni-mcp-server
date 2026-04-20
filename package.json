@@ -20,7 +20,7 @@
     "start:http": "HEDERA_TRANSPORT=http node dist/transports/http.js",
     "bootstrap:audit-topic": "tsx scripts/bootstrap-audit-topic.ts",
     "bootstrap:treasury": "tsx scripts/bootstrap-treasury.ts",
-    "test": "npm run test:unit && npm run test:integration",
+    "test": "vitest run",
     "test:unit": "vitest run test/unit reference-impl/tests",
     "test:integration": "vitest run test/integration",
     "test:e2e": "vitest run test/e2e",
