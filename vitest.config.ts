@@ -41,6 +41,7 @@ export default defineConfig({
         // Bootstrap scripts + shared lib (tested via test/unit/ as of PR #15)
         // `main()` in each script is CLI-scope (v8 ignore) + covered by E2E PR #17.
         'scripts/bootstrap-audit-topic.ts',
+        'scripts/bootstrap-treasury.ts',
         'scripts/lib/bootstrapEnv.ts',
         'scripts/lib/mirrorLookup.ts',
         // reference-impl specs (behavioral contracts for AgentService Go port)

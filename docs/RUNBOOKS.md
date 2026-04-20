@@ -53,6 +53,27 @@ If the daily cap exhausts before midnight:
 - Tier 2: Hedera Buddy (for technical questions about the allowance mechanism).
 - Tier 3: Anand (for policy decisions — e.g., "should we double the daily cap?").
 
+### Allowance repair (post-M4 partial failure)
+
+**Scenario:** `npm run bootstrap:treasury` logged:
+
+```
+[bootstrap-treasury] ERROR: allowance grant failed AFTER treasury 0.0.xxxxx was created...
+```
+
+The treasury account exists on-chain (balance funded) but has NO allowance granted to the agent. Re-running the bootstrap script will NOT retry — it detects the treasury via `HEDERA_XENI_TREASURY_ID` and takes the idempotent path.
+
+**Why it can happen:** tx-fee fluctuation, Mirror Node hiccup during receipt polling, network congestion between the account-create and allowance-approve transactions. The two txs aren't atomic — they're sequential.
+
+**Recovery procedure (placeholder — fill in when first occurrence happens):**
+
+1. Confirm state: query Mirror Node / HashScan to verify (a) the treasury account exists with the configured balance, and (b) no crypto allowance exists for `owner=treasury, spender=agent`.
+2. Retrieve the cold treasury key from wherever ops stashed it after M4 (laptop vault / HSM / hardware wallet).
+3. Sign a one-off `AccountAllowanceApproveTransaction(owner=treasury, spender=agent, amount=<intended-initial-allowance>)` — either via a dedicated small script, the Hiero CLI, or a manually-composed tx. (TODO: add a `scripts/repair-treasury-allowance.ts` helper in a follow-up PR once we see real-world frequency.)
+4. Verify the allowance appeared on Mirror Node before putting the cold key back into offline storage.
+
+**Why this isn't auto-retry in the bootstrap script:** retry-with-backoff on-chain is subtle — we'd need to detect "receipt timeout" vs "real failure" and avoid double-charging if the first tx actually succeeded. Manual repair is the safer first implementation; a helper script can come later when we have data on how often this fires.
+
 ## Testnet balance monitoring
 
 Operator, agent, and treasury testnet accounts need funding.

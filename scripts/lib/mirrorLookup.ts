@@ -146,7 +146,33 @@ export async function findTopicByMemo(
  */
 interface MirrorAccountInfo {
   account?: string;
+  memo?: string;
   key?: { _type: string; key: string } | null;
+}
+
+/**
+ * Fetch an account's memo from Mirror Node. Returns the memo string, or
+ * `null` if the account exists but has no memo. Throws if the account
+ * doesn't exist (HTTP 404 bubbles up as a Mirror Node error).
+ *
+ * Used by M4 bootstrap to VERIFY that a pre-configured
+ * `HEDERA_XENI_TREASURY_ID` actually points to a Xeni-bootstrapped
+ * treasury (memo matches `xeni_treasury_v1_<env>`) — catches the
+ * footgun where ops pastes a wrong account ID into the env.
+ */
+export async function fetchAccountMemo(
+  accountId: string,
+  network: HederaNetwork,
+  options: LookupOptions = {},
+): Promise<string | null> {
+  const baseUrl = options.baseUrl ?? mirrorNodeBaseUrl(network);
+  const url = `${baseUrl}/api/v1/accounts/${encodeURIComponent(accountId)}`;
+  const body = (await fetchJson(url, options)) as MirrorAccountInfo;
+
+  if (!body || typeof body !== 'object') {
+    throw new Error(`Mirror Node /accounts/${accountId} returned non-object body.`);
+  }
+  return typeof body.memo === 'string' ? body.memo : null;
 }
 
 /**
