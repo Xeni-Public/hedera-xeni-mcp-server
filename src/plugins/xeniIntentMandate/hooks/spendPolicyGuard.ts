@@ -24,6 +24,7 @@
 // plugin is wired into HederaMCPToolkit (tracked for the server.buildToolkit impl PR).
 
 import { log } from '../../../logger.js';
+import { invalidNumberReason, toTinybar } from '../hbar.js';
 
 export interface SpendPolicyGuardInput {
   /** Requested allowance amount in HBAR. */
@@ -40,21 +41,6 @@ export interface SpendPolicyGuardResult {
   passed: boolean;
   /** Human-readable reason; populated on reject, omitted on pass. */
   reason?: string;
-}
-
-/** 1 HBAR = 10^8 tinybar. Comparison is done in tinybar integer space to avoid FP rounding. */
-const TINYBAR_PER_HBAR = 100_000_000;
-
-function toTinybar(hbar: number): bigint {
-  // Math.round recovers the integer after float multiplication
-  // (e.g. (0.1 + 0.2) * 1e8 = 30000000.000000004 → 30000000).
-  return BigInt(Math.round(hbar * TINYBAR_PER_HBAR));
-}
-
-function invalidNumberReason(value: number, name: string): string | null {
-  if (!Number.isFinite(value)) return `${name} is not a finite number`;
-  if (value < 0) return `${name} is negative`;
-  return null;
 }
 
 /**
