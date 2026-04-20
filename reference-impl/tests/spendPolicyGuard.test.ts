@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { spendPolicyGuard } from '../../src/plugins/xeniIntentMandate/hooks/spendPolicyGuard.js';
+import { spendPolicyGuard } from '../hooks/spendPolicyGuard.js';
 
 const baseInput = {
   amountHbar: 10,

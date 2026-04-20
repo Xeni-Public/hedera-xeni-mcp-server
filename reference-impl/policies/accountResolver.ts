@@ -1,6 +1,22 @@
 // Authored-by: Anand Palanisamy - anand@xeni.com
 
 /**
+ * ⚑ RETIRED post-pivot (2026-04-20). Preserved here as historical design
+ * context only. Do NOT port to Go.
+ *
+ * Why retired: upstream `@hashgraph/hedera-agent-kit-mcp@1.0.0` takes a
+ * single `Client` at construction time — the entire MCP server runs under
+ * one signing identity (agent). There is no runtime choice of operator
+ * vs agent per tool call to resolve. Operator became cold (bootstrap-only)
+ * in the pivot; this policy's decision matrix has no runtime consumer.
+ *
+ * Tests at `reference-impl/tests/accountResolver.test.ts` still run in
+ * CI as spec verification, but neither the policy nor its tests shape
+ * any Go port. See `docs/HANDOVER_TO_AGENT_SERVICE.md` for what DID
+ * port to AgentService.
+ *
+ * ---
+ *
  * accountResolver policy — picks which Hedera Client (operator or agent) to
  * use for a given tool call.
  *

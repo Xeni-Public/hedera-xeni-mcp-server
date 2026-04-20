@@ -19,7 +19,7 @@
  * Source of truth for remaining allowance: Hedera Mirror Node (no local DB state).
  */
 
-import { log } from '../../../logger.js';
+import { log } from '../logger.js';
 import { fromTinybar, invalidNumberReason, toTinybar } from '../hbar.js';
 
 export interface TreasuryAllowanceGuardInput {

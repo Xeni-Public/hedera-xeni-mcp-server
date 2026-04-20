@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { auditEnvelopeBuilder } from '../../src/plugins/xeniIntentMandate/hooks/auditEnvelopeBuilder.js';
+import { auditEnvelopeBuilder } from '../hooks/auditEnvelopeBuilder.js';
 
 const baseInput = {
   event: 'payment_executed' as const,

@@ -30,7 +30,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import type { FeeBreakdown } from '../../../fees/FeeCalculator.js';
+import type { FeeBreakdown } from '../fees/FeeCalculator.js';
 
 export type AuditEvent =
   | 'payment_executed'

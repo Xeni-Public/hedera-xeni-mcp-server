@@ -1,31 +1,26 @@
 // Authored-by: Anand Palanisamy - anand@xeni.com
 
 /**
- * Account registry — role → Hedera account mapping.
+ * Runtime account registry — agent only post-pivot.
  *
- * See docs/DESIGN.md §3. Three roles in v1: operator, agent, xeni_treasury.
- * Keys are loaded from env at startup. The `xeni_treasury` key is NOT loaded
- * here — it's cold (ops-laptop-signed), never in server process env.
+ * See docs/DESIGN.md §3. Upstream `HederaMCPToolkit` takes a single `Client`;
+ * the running server uses agent as its sole signing identity. Operator and
+ * treasury are cold (bootstrap-only, offline ops) and must NOT be loaded
+ * into the server process env — a WARN fires on startup if their keys are
+ * present.
  *
- * Future-proof: the registry abstraction accepts customer_accounts[] and
- * supplier_accounts[] entries for Phase 4/5 without code changes — just config.
+ * Bootstrap scripts (`scripts/bootstrap-*.ts`) load operator / treasury
+ * from their own env at invocation time — they're standalone scripts and
+ * do not go through this module.
  */
 
-// TODO: import AccountId, PrivateKey from '@hiero-ledger/sdk' after first install
+import { log } from './logger.js';
 
-export type Role = 'operator' | 'agent' | 'xeni_treasury';
-
-export interface RoleAccount {
-  role: Role;
-  accountId: string; // 0.0.xxxxx
-  // Private key present only for roles the server signs with.
-  // xeni_treasury key is NEVER loaded here — see design doc §3 P1.
-  privateKey?: string;
-}
-
-export interface AccountRegistry {
-  get(role: Role): RoleAccount;
-  has(role: Role): boolean;
+export interface AgentAccount {
+  /** Agent account ID (0.0.xxxxx). */
+  accountId: string;
+  /** ECDSA private key (hex-encoded DER or raw). */
+  privateKey: string;
 }
 
 function requireEnv(name: string): string {
@@ -37,42 +32,33 @@ function requireEnv(name: string): string {
 }
 
 /**
- * Build the registry from env. Throws at startup if required env vars are
- * missing — fail-loud per §15 migration rule ("server never auto-creates").
+ * Warn loudly if a cold-key env var is present in the server's runtime env.
+ * Fires at startup; doesn't block. The WARN is the ops signal — if it
+ * shows up in prod logs, someone populated the wrong env file.
  */
-export function buildAccountRegistry(): AccountRegistry {
-  const operator: RoleAccount = {
-    role: 'operator',
-    accountId: requireEnv('HEDERA_OPERATOR_ID'),
-    privateKey: requireEnv('HEDERA_OPERATOR_KEY'),
-  };
+function warnIfColdKeyLeaked(envName: string, role: string): void {
+  if (process.env[envName] && process.env[envName]?.trim() !== '') {
+    log.warn(
+      `Cold-key env var present in server runtime env — this breaks the "${role} stays cold" invariant. ` +
+        `See docs/DESIGN.md §3. Remove from this env; keep it only in bootstrap-script env files.`,
+      { env: envName, role },
+    );
+  }
+}
 
-  const agent: RoleAccount = {
-    role: 'agent',
-    accountId: requireEnv('HEDERA_AGENT_ID'),
-    privateKey: requireEnv('HEDERA_AGENT_KEY'),
-  };
-
-  // Treasury: account ID only (key is cold — see docs/DESIGN.md §3 + RUNBOOKS).
-  const treasury: RoleAccount = {
-    role: 'xeni_treasury',
-    accountId: requireEnv('HEDERA_XENI_TREASURY_ID'),
-  };
-
-  const map = new Map<Role, RoleAccount>([
-    ['operator', operator],
-    ['agent', agent],
-    ['xeni_treasury', treasury],
-  ]);
+/**
+ * Load the agent account from env. Throws at startup if required env vars
+ * are missing (fail-loud per §15). Also scans for cold-key leaks and warns.
+ */
+export function loadAgentAccount(): AgentAccount {
+  // Cold-key invariant checks — WARN only, don't throw. Running server
+  // should never see these, but if it does we want the log trail, not
+  // a hard failure that obscures the underlying misconfiguration.
+  warnIfColdKeyLeaked('HEDERA_OPERATOR_KEY', 'operator');
+  warnIfColdKeyLeaked('HEDERA_XENI_TREASURY_KEY', 'xeni_treasury');
 
   return {
-    get(role: Role): RoleAccount {
-      const a = map.get(role);
-      if (!a) throw new Error(`Role not configured: ${role}`);
-      return a;
-    },
-    has(role: Role): boolean {
-      return map.has(role);
-    },
+    accountId: requireEnv('HEDERA_AGENT_ID'),
+    privateKey: requireEnv('HEDERA_AGENT_KEY'),
   };
 }
