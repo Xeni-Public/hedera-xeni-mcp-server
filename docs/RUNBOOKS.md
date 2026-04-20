@@ -5,6 +5,7 @@
 Operational procedures for ops + on-call engineers. Each section is a self-contained playbook.
 
 **Alert channels:**
+
 - `#non-prod-oncall-fund-treasury` (dev / qa / uat)
 - `#oncall-fund-treasury` (prod)
 - Workspace: `xeniworkspace.slack.com`
@@ -12,12 +13,15 @@ Operational procedures for ops + on-call engineers. Each section is a self-conta
 ## Treasury replenishment (nightly manual top-up)
 
 ### When this runs
+
 Daily at 00:00 `America/Los_Angeles` — on-call ops signs a fresh `AccountAllowanceApproveTransaction` that grants the agent the daily refund budget for the next 24h. Triggered by schedule, or manually mid-day if the 80% alert fires.
 
 ### Key location
+
 Treasury key is **cold** (not in the server process env).
 
 `TODO(p1):` document cold-key operational definition concretely. Candidate options:
+
 - Ops laptop-signed (offline) — the default POC expectation. Key lives on an ops engineer's laptop; connects to Hedera only to sign this transaction. Never deployed to any server env.
 - Hardware wallet (Ledger + Hedera app) — Phase 2 if we want stronger separation.
 - HSM — Phase 3 when compliance requires it.
@@ -36,6 +40,7 @@ Implementation PR fills this in with the concrete mechanism Xeni adopts.
 ### Cap-hit UX (mid-day cap exhaustion)
 
 If the daily cap exhausts before midnight:
+
 1. Active refund attempts fail with `treasuryAllowanceGuard` rejection.
 2. Claude (via AgentService) informs the user: "Refund is processing — it will complete within 24 hours."
 3. On-call engineer is paged via `#oncall-fund-treasury` at the 80% threshold alert (giving 20% buffer to act).
@@ -65,6 +70,7 @@ Operator, agent, and treasury testnet accounts need funding.
 > Note: this runbook is mirrored from AgentService's repo for Hedera-side context. Authoritative copy lives in AgentService's repo.
 
 If an outbox row reaches `status=dead_letter`:
+
 1. Dead-letter alert fires in the env's channel with: `intent_id`, `event_type`, `event_id`, retry count, last error.
 2. On-call triages: is it a permanent schema issue (rebuild payload + resubmit) or transient Hedera / network issue (manual requeue)?
 3. If transient: `UPDATE hedera_audit_outbox SET status='pending', retry_count=0 WHERE id=<id>;` and let the worker pick it up.
@@ -77,6 +83,7 @@ Runs after migration action items M1–M4 complete and all three PRs (Hedera, Ag
 `TODO(p5):` expand this section with exact commands and expected outputs. Skeleton:
 
 ### Prereqs
+
 - Operator / agent / treasury accounts funded on `testnet-uat`.
 - `HEDERA_XENI_AUDIT_TOPIC_ID` populated in all three services from M3 output.
 - Treasury→agent refund allowance live (from M4 output).

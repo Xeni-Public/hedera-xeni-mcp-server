@@ -16,15 +16,73 @@ In one sentence: lets the AI travel agent spend HBAR from a user's wallet (withi
 
 Concretely, v1 exposes:
 
-| Upstream tool (from `hedera-agent-kit`) | Used for |
-|---|---|
-| `approve_hbar_allowance` | User A grants a spending allowance to the Xeni agent account (user-signed via wallet, `AgentMode.RETURN_BYTES`) |
-| `transfer_hbar_with_allowance` | Agent spends within the allowance to pay `xeni_treasury` (booking) or refund User A (treasury→agent refund allowance) |
-| `transfer_hbar` | Direct transfer (used for ops flows, not user payments) |
-| `submit_message` | HCS audit event submission (driven by AgentService's outbox worker, not by this server) |
-| `create_topic` | One-time global `xeni_audit` topic creation per environment (via `scripts/bootstrap-audit-topic.ts`, not a server tool) |
+| Upstream tool (from `hedera-agent-kit`) | Used for                                                                                                                |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `approve_hbar_allowance`                | User A grants a spending allowance to the Xeni agent account (user-signed via wallet, `AgentMode.RETURN_BYTES`)         |
+| `transfer_hbar_with_allowance`          | Agent spends within the allowance to pay `xeni_treasury` (booking) or refund User A (treasury→agent refund allowance)   |
+| `transfer_hbar`                         | Direct transfer (used for ops flows, not user payments)                                                                 |
+| `submit_message`                        | HCS audit event submission (driven by AgentService's outbox worker, not by this server)                                 |
+| `create_topic`                          | One-time global `xeni_audit` topic creation per environment (via `scripts/bootstrap-audit-topic.ts`, not a server tool) |
 
-Our custom layer on top is **4 hooks + 1 policy** — no new tools. See [docs/DESIGN.md](docs/DESIGN.md) for the full picture.
+There is **no custom Xeni layer on top of these tools** in the MCP. Upstream tools are exposed as-is via `HederaMCPToolkit`. All Xeni-specific business logic (spend-policy ceiling check, mandate-budget check, treasury-allowance check + Slack alerts, audit envelope building) lives in **AgentService** (Go). See the Architecture section below for why, and [docs/HANDOVER_TO_AGENT_SERVICE.md](docs/HANDOVER_TO_AGENT_SERVICE.md) for the Go-port specs.
+
+## Architecture: why guards live in AgentService, not in the MCP
+
+The original plan was a plugin in this MCP that wrapped upstream tools with Xeni-specific hooks (spend ceiling, mandate budget, treasury allowance + Slack alerts, audit envelope builder). After verifying upstream `@hashgraph/hedera-agent-kit-mcp@1.0.0`, two constraints made that MCP-side design impractical, and we pivoted to a thinner MCP with the guards on the AgentService side.
+
+### What we leverage from upstream hedera-agent-kit-js
+
+We stay on the happy path and touch nothing upstream (no forks, no patches, no runtime monkey-patching — only config files consume upstream):
+
+| Upstream surface                                                                               | How we use it                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `HederaMCPToolkit` (`@hashgraph/hedera-agent-kit-mcp`)                                         | Construct once with `{ client, configuration }` — it registers every upstream tool as an MCP method for us                                                   |
+| Core account tools (`approve_hbar_allowance`, `transfer_hbar_with_allowance`, `transfer_hbar`) | Exposed via the toolkit unchanged; no wrappers                                                                                                               |
+| Core consensus tools (`submit_message`)                                                        | Exposed via the toolkit; AgentService's outbox worker calls it                                                                                               |
+| `Client` from `@hiero-ledger/sdk`                                                              | One instance, constructed at startup from agent env vars, injected into the toolkit                                                                          |
+| `AgentMode.AUTONOMOUS` / `AgentMode.RETURN_BYTES`                                              | Mode context flag — AgentService chooses per call (RETURN_BYTES for user allowance grants signed in wallet; AUTONOMOUS for everything else the server signs) |
+| stdio + StreamableHTTP transports (`@modelcontextprotocol/sdk`)                                | Bind the toolkit to a transport — AgentService spawns us via stdio; http is dev-loopback only                                                                |
+| `TopicCreateTransaction`, `AccountCreateTransaction`, `AccountAllowanceApproveTransaction`     | Used directly in `scripts/bootstrap-*.ts` for one-time M3/M4 bootstrap; not at runtime                                                                       |
+
+**Upstream is untouched.** Our repo pins exact versions (see [docs/DESIGN_DEPENDENCIES.md](docs/DESIGN_DEPENDENCIES.md)) and imports from published packages — no forks, no patches, no subclasses that override upstream behavior. Only Xeni repo files (`.env`, `.npmrc`, `package.json`, our own `src/`) are our creations.
+
+### Pros of moving guards to AgentService
+
+| Pro                                      | Details                                                                                                                                                                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Upstream untouched**                   | No forks of `@hashgraph/hedera-agent-kit-mcp`; we stay on released versions. Upgrades follow upstream's own cadence.                                                                                                                 |
+| **MCP stays thin**                       | ~150 lines of wiring (toolkit + transports + config + logger) vs. ~1000+ lines of guards + hooks + plugin infrastructure. Smaller surface to review, test, maintain, upgrade.                                                        |
+| **Single signing identity**              | Matches upstream's `HederaMCPToolkit` which takes one `Client`. Agent is the only key in the server process — operator + treasury stay cold (bootstrap + ops only). Smaller attack surface.                                          |
+| **Fail-fast guards**                     | AgentService rejects policy-violating calls before a round-trip to MCP. Faster user-visible feedback.                                                                                                                                |
+| **Single place for Xeni business logic** | Policy, mandate, treasury allowance, audit envelope, fee calculation all live in Go in one repo next to the intent state they reference. No TS↔Go drift risk.                                                                       |
+| **No metadata-threading hack**           | Upstream `@hashgraph/hedera-agent-kit-mcp` doesn't forward `_meta` from MCP requests into tool execution (it drops `_extra` before calling `_hederaAgentKit.run`). No need for Xeni-branded wrapper tools with extended zod schemas. |
+| **Simpler test story**                   | MCP CI validates wiring, not business logic. AgentService's Go tests own the policy invariants. Porting guards from TS specs to Go ports is a known pattern.                                                                         |
+| **Easier to swap MCP out**               | If upstream ever ships a deployable MCP binary directly, we could drop this repo entirely and point AgentService at theirs. No Xeni code to migrate.                                                                                 |
+
+### Cons / tradeoffs
+
+| Con                                                    | Mitigation                                                                                                                                               |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **AgentService Buddy has more Go work**                | TS reference implementations + 68 tests live in `reference-impl/` as behavioral specs to port against. Handover doc walks through each guard's contract. |
+| **Lose single-language Xeni policy story**             | Was never quite true — `accountResolver` was TS-only, but all callers were already Go. Now it's uniformly Go.                                            |
+| **TS reference code is technically unused at runtime** | Kept in `reference-impl/` and still executed by `vitest` so the specs stay live. Tests serve as executable documentation of expected guard behavior.     |
+| **Design doc §6 ("custom Xeni layer") is reduced**     | Rewritten to reflect current state — no MCP-side plugin, no AbstractHook wrappers, no custom tools.                                                      |
+| **No hook-based observability inside MCP**             | Consequence, not really a loss — AgentService logs every guard decision with full intent context; the MCP doesn't need to duplicate.                     |
+| **Marginal extra DB round-trip**                       | AgentService has to read mandate state for mandate-budget guard anyway — minimal extra cost.                                                             |
+
+### What stayed in the original design
+
+The pivot is scoped to guard placement. Everything else holds:
+
+- **Single global `xeni_audit` HCS topic per environment** (design §5)
+- **Rolling daily refund cap, Slack alert at 80% consumed, manual nightly top-up** (design §4) — still the ops story; just implemented in Go now
+- **Outbox pattern for audit durability** (design §13) — unchanged
+- **Migrations are standalone deploy steps, Anand runs** (design §15) — unchanged
+- **UTC persistence + PST for ops readability + cap cutover** (design §4 tz rules) — unchanged
+- **Per-env account + topic isolation** (design §3 + §5) — unchanged
+- **Public/private boundary for fee logic** — now AgentService-side instead of MCP-side
+
+See [docs/DESIGN.md](docs/DESIGN.md) for the full updated architecture; [docs/HANDOVER_TO_AGENT_SERVICE.md](docs/HANDOVER_TO_AGENT_SERVICE.md) for the AgentService-side work breakdown.
 
 ## How this server fits in the system
 
@@ -73,12 +131,12 @@ npm run test:e2e                     # E2E on testnet — nightly, not per-PR
 
 Per-env account + topic isolation. No shared accounts across envs.
 
-| Env | Network | Config file |
-|---|---|---|
-| `dev` | Hedera testnet | `.env.dev` |
-| `testnet-ci` | Hedera testnet (CI) | CI secrets |
-| `testnet-uat` | Hedera testnet (UAT) | `.env.testnet-uat` |
-| `mainnet-prod` | Hedera mainnet | Prod secrets manager |
+| Env            | Network              | Config file          |
+| -------------- | -------------------- | -------------------- |
+| `dev`          | Hedera testnet       | `.env.dev`           |
+| `testnet-ci`   | Hedera testnet (CI)  | CI secrets           |
+| `testnet-uat`  | Hedera testnet (UAT) | `.env.testnet-uat`   |
+| `mainnet-prod` | Hedera mainnet       | Prod secrets manager |
 
 ## Documentation
 

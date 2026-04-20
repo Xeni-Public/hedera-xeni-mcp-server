@@ -2,19 +2,32 @@
 
 # hedera-xeni-mcp-server — v1 Design
 
-**Status:** v1, scaffold stage. Structure + docs landed; implementation lands in subsequent PRs.
+**Status:** v1, scaffold + 3 guard hooks landed; **architectural pivot 2026-04-20** relocates guards to AgentService. See the pivot note below, then [HANDOVER_TO_AGENT_SERVICE.md](HANDOVER_TO_AGENT_SERVICE.md) for Go-port specs.
+
+> ### ⚑ 2026-04-20 — Architectural pivot to Option D (guards in AgentService)
+>
+> Originally this MCP hosted the Xeni guard layer (4 hooks + 1 policy) on top of upstream tools. Verifying `@hashgraph/hedera-agent-kit-mcp@1.0.0` surfaced two upstream constraints that made that design impractical:
+>
+> 1. **Single-client model** — `HederaMCPToolkit({ client, configuration })` takes one signing identity for the whole server. Dual-identity (operator + agent) inside one MCP would require running two toolkit instances, forking the MCP package, or fragile mid-transaction client swaps.
+> 2. **No per-call metadata passthrough** — upstream drops MCP `_meta` (in `_extra`) before calling tools; hooks can't see per-call `intentId` / policy / mandate state without extending every tool's zod params (custom wrapper tools) or forking upstream.
+>
+> **Decision:** MCP stays thin (upstream toolkit + transports + agent client + bootstrap scripts). All Xeni business logic (spend policy, mandate budget, treasury allowance + Slack alert + Mirror Node query, audit envelope builder, fee calculator) moves to AgentService (Go). TS reference implementations from PR #4/#5/#6 go to `reference-impl/` as executable specs.
+>
+> **Sections affected by this pivot:** §3 (operator now cold), §6 (plugin surface empty), §7 (fee plugin moves), §10 (agent pays HCS fees, not operator), §13 (audit flow simpler), §14 (test strategy), §16 (response shape drops `auditEnvelope`). Each section below is updated; pre-pivot content is kept where still accurate.
+>
+> **What stays:** outbox pattern §13, per-env topic model §5, refund allowance strategy §4 (now implemented Go-side), global timezone rule, migration convention §15.
 
 ## 1. Purpose
 
-Thin plugin-based MCP server on upstream [`hedera-agent-kit-js`](https://github.com/hashgraph/hedera-agent-kit-js) v4. Minimum Hedera tool surface for autonomous travel bookings (HBAR payments + HCS audit). Xeni intent-mandate semantics layered via the kit's hook/policy system.
+Thin MCP server on upstream [`hedera-agent-kit-js`](https://github.com/hashgraph/hedera-agent-kit-js) v4. Exposes upstream HBAR payment + HCS audit tools as-is via `HederaMCPToolkit`. No Xeni custom tools, no plugin-level hooks, no dual-client logic — AgentService (Go) owns the business logic that sits in front of and behind these calls.
 
 ## 2. Upstream dependencies
 
-| Package | Role | Version |
-|---|---|---|
-| `@hashgraph/hedera-agent-kit` | Plugin system, `BaseTool`, hooks, policies | Exact pin — see [DESIGN_DEPENDENCIES.md](DESIGN_DEPENDENCIES.md) |
-| `@hashgraph/hedera-agent-kit-mcp` | `HederaMCPToolkit` (MCP server wrapper: stdio + StreamableHTTP) | Exact pin |
-| `@hiero-ledger/sdk` | Low-level Hedera SDK (renamed from `@hashgraph/sdk` in v4) | Exact pin |
+| Package                           | Role                                                            | Version                                                          |
+| --------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `@hashgraph/hedera-agent-kit`     | Plugin system, `BaseTool`, hooks, policies                      | Exact pin — see [DESIGN_DEPENDENCIES.md](DESIGN_DEPENDENCIES.md) |
+| `@hashgraph/hedera-agent-kit-mcp` | `HederaMCPToolkit` (MCP server wrapper: stdio + StreamableHTTP) | Exact pin                                                        |
+| `@hiero-ledger/sdk`               | Low-level Hedera SDK (renamed from `@hashgraph/sdk` in v4)      | Exact pin                                                        |
 
 **Built-in tools we use without forking:** `create_topic` (one-time at deploy, via bootstrap script), `submit_message`, `approve_hbar_allowance`, `transfer_hbar_with_allowance`, `transfer_hbar`.
 
@@ -22,14 +35,14 @@ Mode switch (`AgentMode.AUTONOMOUS` vs `AgentMode.RETURN_BYTES`) is context-driv
 
 ## 3. Account model (role-based registry; v1 minimum)
 
-| Role | v1 | Future |
-|---|---|---|
-| `operator` | Xeni platform admin (pays HCS fees, topic ops). ECDSA key in env. | — |
-| `agent` | Autonomous spender, bounded by allowances, signs approved transfers in both directions. ECDSA key in env. | — |
-| `xeni_treasury` | Xeni-as-MoR receiving + refunding account. **Dedicated account, distinct from operator. Key kept cold** — used only for initial + replenishment refund-allowance approvals; never in server process env. Bootstrap via `scripts/bootstrap-treasury.ts` per env. <br><br>`TODO(p1):` document cold-key operational definition concretely: ops-laptop-signed (offline) / HSM / hardware wallet. POC is probably "ops-laptop-signed, never loaded into server env." Fill during implementation PR once ops procedure is ratified. | — |
-| `xeni_platform_fee` | Off-chain bookkeeping | Optional on-chain split |
-| `customer_accounts[*]` | Deferred | Phase 5: Customer-MoR |
-| `supplier_accounts[*]` | Deferred | Phase 4: on-chain settlement |
+| Role                   | v1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Future                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- |
+| `operator`             | Xeni platform admin. **Key kept cold** post-pivot — used only for bootstrap scripts (M3 topic create, M4 treasury create) and ops emergencies. **NOT loaded in the running server's env.** Since upstream's `HederaMCPToolkit` takes one client (agent), operator never signs at runtime.                                                                                                                                                                                                                                      | —                            |
+| `agent`                | Sole runtime signing identity in the MCP server. Signs every tool-driven transaction: approve allowance bytes (user-signed in RETURN_BYTES mode, not signed by agent), transfers via allowance, and HCS audit submits (agent pays the HCS fee now that operator is cold). ECDSA key in server env.                                                                                                                                                                                                                             | —                            |
+| `xeni_treasury`        | Xeni-as-MoR receiving + refunding account. **Dedicated account, distinct from operator. Key kept cold** — used only for initial + replenishment refund-allowance approvals; never in server process env. Bootstrap via `scripts/bootstrap-treasury.ts` per env. <br><br>`TODO(p1):` document cold-key operational definition concretely: ops-laptop-signed (offline) / HSM / hardware wallet. POC is probably "ops-laptop-signed, never loaded into server env." Fill during implementation PR once ops procedure is ratified. | —                            |
+| `xeni_platform_fee`    | Off-chain bookkeeping                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Optional on-chain split      |
+| `customer_accounts[*]` | Deferred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Phase 5: Customer-MoR        |
+| `supplier_accounts[*]` | Deferred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Phase 4: on-chain settlement |
 
 **Per-env account isolation:** `operator`, `agent`, `xeni_treasury` each get distinct testnet accounts per environment (`dev`, `testnet-ci`, `testnet-uat`) + dedicated mainnet accounts for prod. No shared accounts across envs.
 
@@ -43,16 +56,16 @@ Mode switch (`AgentMode.AUTONOMOUS` vs `AgentMode.RETURN_BYTES`) is context-driv
 
 ### Refund allowance strategy
 
-| Decision | Value |
-|---|---|
-| **Sizing** | Rolling daily cap, **HBAR-denominated** (e.g. 10k HBAR/day; tune with volume data). Deterministic, no oracle dependency. |
-| **Fiat context in alerts** | Slack alert message includes fiat-equivalent of remaining balance and daily cap, computed at alert time (Mirror Node exchange-rate query or CoinGecko). Cap itself stays HBAR. |
-| **Refresh** | Manual nightly top-up — on-call ops signs new approval. |
-| **Alert** | Slack webhook at 80% consumed (20% remaining). Channels per env: `#non-prod-oncall-fund-treasury` (dev/qa/uat), `#oncall-fund-treasury` (prod). Workspace: `xeniworkspace.slack.com`. |
-| **Source of truth** | Query Hedera Mirror Node for remaining allowance — no local DB state. |
-| **Runbook** | [RUNBOOKS.md](RUNBOOKS.md) covers: (a) nightly top-up, (b) cap-hit UX, (c) mid-day extension, (d) on-call escalation. Weekend/vacation coverage via on-call rotation implied by channel names. |
+| Decision                    | Value                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sizing**                  | Rolling daily cap, **HBAR-denominated** (e.g. 10k HBAR/day; tune with volume data). Deterministic, no oracle dependency.                                                                                                                                                                                                                                             |
+| **Fiat context in alerts**  | Slack alert message includes fiat-equivalent of remaining balance and daily cap, computed at alert time (Mirror Node exchange-rate query or CoinGecko). Cap itself stays HBAR.                                                                                                                                                                                       |
+| **Refresh**                 | Manual nightly top-up — on-call ops signs new approval.                                                                                                                                                                                                                                                                                                              |
+| **Alert**                   | Slack webhook at 80% consumed (20% remaining). Channels per env: `#non-prod-oncall-fund-treasury` (dev/qa/uat), `#oncall-fund-treasury` (prod). Workspace: `xeniworkspace.slack.com`.                                                                                                                                                                                |
+| **Source of truth**         | Query Hedera Mirror Node for remaining allowance — no local DB state.                                                                                                                                                                                                                                                                                                |
+| **Runbook**                 | [RUNBOOKS.md](RUNBOOKS.md) covers: (a) nightly top-up, (b) cap-hit UX, (c) mid-day extension, (d) on-call escalation. Weekend/vacation coverage via on-call rotation implied by channel names.                                                                                                                                                                       |
 | **Timezone (cutover only)** | `America/Los_Angeles` (PST/PDT) — 00:00 Pacific is the daily cap-reset + replenishment window boundary. IANA name used in code to handle DST. **Scope: only the cutover boundary.** All persisted timestamps, HCS payload times, inter-service protocol fields, and log lines remain **UTC**. PST is resolved to UTC at the boundary by the scheduler; never stored. |
-| **Phase 2** | Auto-top-up when threshold crossed. |
+| **Phase 2**                 | Auto-top-up when threshold crossed.                                                                                                                                                                                                                                                                                                                                  |
 
 ## 5. HCS topic model
 
@@ -60,12 +73,12 @@ Mode switch (`AgentMode.AUTONOMOUS` vs `AgentMode.RETURN_BYTES`) is context-driv
 
 **Per-env topic IDs:** separate topic per environment to avoid mixing dev / CI / UAT / prod streams.
 
-| Env | Topic ID env var | Created by |
-|---|---|---|
-| dev | `HEDERA_XENI_AUDIT_TOPIC_ID` in `.env.dev` | Bootstrap script, local testnet |
-| testnet-ci | `HEDERA_XENI_AUDIT_TOPIC_ID` in CI secrets | Bootstrap script, testnet |
-| testnet-uat | `HEDERA_XENI_AUDIT_TOPIC_ID` in UAT config | Bootstrap script, testnet |
-| mainnet-prod | `HEDERA_XENI_AUDIT_TOPIC_ID` in prod secrets | Bootstrap script, mainnet |
+| Env          | Topic ID env var                             | Created by                      |
+| ------------ | -------------------------------------------- | ------------------------------- |
+| dev          | `HEDERA_XENI_AUDIT_TOPIC_ID` in `.env.dev`   | Bootstrap script, local testnet |
+| testnet-ci   | `HEDERA_XENI_AUDIT_TOPIC_ID` in CI secrets   | Bootstrap script, testnet       |
+| testnet-uat  | `HEDERA_XENI_AUDIT_TOPIC_ID` in UAT config   | Bootstrap script, testnet       |
+| mainnet-prod | `HEDERA_XENI_AUDIT_TOPIC_ID` in prod secrets | Bootstrap script, mainnet       |
 
 Total topic-create cost: ~$0.04 for all four envs (one-time). Negligible.
 
@@ -96,6 +109,7 @@ Total topic-create cost: ~$0.04 for all four envs (one-time). Negligible.
 ```
 
 **Fields:**
+
 - `schema_version: 1` — readers detect v1 vs future v2 and adapt without breaking.
 - `event_id` — server-generated UUID v4 for consumer-side deduplication. HCS gives sequence per topic, but `event_id` is globally unique and survives DB-mirror replay.
 - `tx_timestamp` — consensus timestamp from the receipt, UTC ISO 8601.
@@ -106,47 +120,44 @@ Total topic-create cost: ~$0.04 for all four envs (one-time). Negligible.
 
 Day-1 schema holds placeholders for future on-chain splits (`supplier_cost`, `customer_commission`) so no audit-ledger migration when supplier/commission payouts move on-chain later.
 
-## 6. Intent-mandate plugin (public) — tool/hook surface
+## 6. Intent-mandate plugin — REMOVED post-pivot
 
-| Component | Stage | Purpose | Side effects |
-|---|---|---|---|
-| `spendPolicyGuard` (hook) | `postParamsNormalizationHook` | Rejects `approve_hbar_allowance` if amount > user's policy ceiling | None (rejects or passes) |
-| `mandateBudgetGuard` (hook) | `postParamsNormalizationHook` | Rejects `transfer_hbar_with_allowance` if exceeds remaining mandate | None |
-| `treasuryAllowanceGuard` (hook) | `postParamsNormalizationHook` | Rejects refund if exceeds remaining treasury→agent daily cap; Slack alert at 80% | Slack webhook call (alert only, not audit) |
-| `auditEnvelopeBuilder` (hook) | `postCoreActionHook` | Builds the audit event payload from tool result; **does NOT submit to HCS** | None — pure function; attached to response |
-| `accountResolver` (policy) | — | Picks `operator` vs `agent` Client per tool | None |
+**Post-pivot state:** this MCP has **no Xeni plugin, no hooks, no custom policy**. Upstream tools are exposed as-is through `HederaMCPToolkit`.
 
-**Zero net-new tools. Entire Xeni layer = 4 hooks + 1 policy.**
+All four hooks + one policy previously planned here (`spendPolicyGuard`, `mandateBudgetGuard`, `treasuryAllowanceGuard`, `auditEnvelopeBuilder`, `accountResolver`) are **relocated to AgentService** per the pivot callout at the top of this doc. Go-port specs and contracts are in [HANDOVER_TO_AGENT_SERVICE.md](HANDOVER_TO_AGENT_SERVICE.md). TS reference implementations live in `reference-impl/` with their vitest suites intact as behavioral specs.
 
-**Key invariant:** `auditEnvelopeBuilder` runs at `postCoreActionHook`, which `BaseTool` only invokes if `coreAction` succeeded. Audit envelopes never exist for failed transfers. HCS submission is driven by AgentService's outbox worker — not by this MCP.
+### Pre-pivot surface (historical, for reference)
+
+Previously planned MCP-side layer (now not implemented in this repo):
+
+| Component                                                  | Where now                                                       |
+| ---------------------------------------------------------- | --------------------------------------------------------------- |
+| `spendPolicyGuard`                                         | AgentService, pre-`approve_hbar_allowance` call                 |
+| `mandateBudgetGuard`                                       | AgentService, pre-`transfer_hbar_with_allowance` (payment path) |
+| `treasuryAllowanceGuard` + Slack alert + Mirror Node query | AgentService, pre-`transfer_hbar_with_allowance` (refund path)  |
+| `auditEnvelopeBuilder`                                     | AgentService, post-MCP-response before outbox write             |
+| `accountResolver`                                          | Not needed — single runtime client (agent)                      |
+
+**Zero tools, zero hooks, zero policies in the MCP plugin system.** The "Xeni intent-mandate plugin" concept is gone from this repo. What remains inside `src/` is the MCP scaffolding: `server.ts` (toolkit construction), `transports/` (stdio + http), `accounts.ts` (single-account validation), `logger.ts`.
 
 ## 7. Public / private boundary
 
-**Repo visibility for v1:** Internal repo (`xeni-app/hedera-xeni-mcp-server`) ships the reference Xeni-MoR scaffolding under **Apache-2.0**. Public release to `Xeni-Public/hedera-xeni-mcp-server` is **deferred until v1 is proven working**. Apache-2.0 license is retained on the internal repo so the eventual public push is a simple remote add, not a license swap. The "public repo" terminology below describes the long-term distribution intent; today, both public and private plugins live in private-org repos.
+**Repo visibility for v1:** Internal repo (`xeni-app/hedera-xeni-mcp-server`) under **Apache-2.0**. Public release to `Xeni-Public/hedera-xeni-mcp-server` is **deferred until v1 is proven working**. Apache-2.0 license is retained on the internal repo so the eventual public push is a remote add, not a license swap.
 
-Private fee-calculation logic is a separate plugin loaded at runtime via env (`HEDERA_XENI_PRIVATE_PLUGINS`).
+**Post-pivot:** this MCP has **no proprietary business logic**. There is nothing to hide — the server is a thin wrapper over upstream `hedera-agent-kit-js` + Xeni-specific env conventions + bootstrap scripts. The public/private split that previously existed inside this MCP (for the fee calculator plugin) has **moved to AgentService**.
 
-```
-hedera-xeni-mcp-server/              (PUBLIC)
-├── src/plugins/xeniIntentMandate/   (PUBLIC — hooks + policy only, no tools)
-├── src/fees/FeeCalculator.ts        (PUBLIC — interface)
-├── src/fees/DefaultFeeCalculator.ts (PUBLIC — reference impl)
+### What moved
 
-hedera-xeni-mcp-fee-private/         (PRIVATE, xeni-app only)
-└── src/platformFeeCalculator.ts     (PRIVATE — real fee logic)
-```
+| Pre-pivot (MCP)                                                              | Post-pivot (AgentService)                                                                       |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `src/fees/FeeCalculator.ts` (interface)                                      | `reference-impl/fees/FeeCalculator.ts` (TS spec) → Go port in AgentService                      |
+| `src/fees/DefaultFeeCalculator.ts` (10% flat, public reference)              | `reference-impl/fees/DefaultFeeCalculator.ts` (TS spec) → Go port in AgentService for tests/dev |
+| `hedera-xeni-mcp-fee-private` repo plan (dynamic plugin loading)             | AgentService-private Go module with the real fee logic                                          |
+| `HEDERA_XENI_PRIVATE_PLUGINS` env, `EXPECTED_FEE_CALCULATOR_IMPL` assertions | AgentService-side equivalents (Go `FeeCalculator` interface + startup assertion)                |
 
-**Loader behavior — fail-open dev / fail-closed UAT+prod:**
+**Nothing private lives in this MCP.** A future open-source push of this repo can happen cleanly — no fee-logic secrets to redact, no dynamic-load plumbing to document. `.env.example`, `README.md`, and bootstrap scripts are the most Xeni-specific files; those describe the public integration surface.
 
-| Env | `HEDERA_XENI_PRIVATE_PLUGINS` set? | Loader failure behavior |
-|---|---|---|
-| `NODE_ENV=development` | unset | Load `DefaultFeeCalculator`. Log `[INFO] Loaded fee calculator: DefaultFeeCalculator`. |
-| `NODE_ENV=development` | set but load fails | **Fail-open.** Fall back to `DefaultFeeCalculator`. Log `[WARN] Private plugin load failed, falling back to DefaultFeeCalculator: <error>`. |
-| `NODE_ENV=test` | — | Same as dev — fail-open. |
-| `NODE_ENV=production` (UAT + prod) | unset | **Fail-closed.** Server refuses to start. Exit 1. Log `[ERROR] HEDERA_XENI_PRIVATE_PLUGINS required in production; refusing to start.` |
-| `NODE_ENV=production` | set but load fails | **Fail-closed.** Server refuses to start. Exit 1. Log the error. |
-
-**Startup health check:** after fee-calculator load, assert loaded impl name matches `EXPECTED_FEE_CALCULATOR_IMPL` env var (when set). Mismatch = refuse to start. Emit `[INFO] Loaded fee calculator: <impl-name>` on success so ops can grep logs and confirm.
+See [HANDOVER_TO_AGENT_SERVICE.md §6](HANDOVER_TO_AGENT_SERVICE.md) for the fee-calculator Go port specs.
 
 ## 8. Transports
 
@@ -154,11 +165,11 @@ Both `stdio` (AgentService spawns as child) and `StreamableHTTP` (debugging) sup
 
 **Binding + security rules:**
 
-| Env | Transport | Binding | Auth |
-|---|---|---|---|
-| dev | stdio OR http | http binds `127.0.0.1` only (loopback) via `HEDERA_HTTP_BIND` env. Default is loopback. | None — loopback only. |
-| testnet-ci / testnet-uat | **stdio only** | N/A | AgentService spawns as child; no network boundary. |
-| mainnet-prod | **stdio only** | N/A | Same. |
+| Env                      | Transport      | Binding                                                                                 | Auth                                               |
+| ------------------------ | -------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| dev                      | stdio OR http  | http binds `127.0.0.1` only (loopback) via `HEDERA_HTTP_BIND` env. Default is loopback. | None — loopback only.                              |
+| testnet-ci / testnet-uat | **stdio only** | N/A                                                                                     | AgentService spawns as child; no network boundary. |
+| mainnet-prod             | **stdio only** | N/A                                                                                     | Same.                                              |
 
 **Hard rule:** in UAT and prod, the MCP server must NEVER be reachable from outside the AgentService container. No HTTP port bound. HTTP in non-dev requires a token-gated auth layer (not in v1 scope).
 
@@ -184,14 +195,21 @@ AgentService owns the intent state machine. Money tool calls are synchronous (`p
 ## 10. Cost model
 
 Per-message HCS fee ~$0.0002 (300-byte payload). At 10k bookings/day × ~5 events/booking:
+
 - Message submits: ~$3,650/yr
-- Topic creates: ~$0.01 one-time (was ~$36,500/yr under per-intent model — saved)
+- Topic creates: ~$0.01 one-time per env (was ~$36,500/yr under the abandoned per-intent model — saved)
 
 **Rules:**
+
 - HCS = audit only, never ops signaling (Slack handles alerts; HCS is ~$0.0002 each, Slack is free).
-- Operator account pays HCS fees → needs its own balance monitoring + low-balance Slack alert.
-- Keep payloads compact — every 100 bytes saved = ~$0.00011/event.
+- **Agent account pays HCS fees** post-pivot. Previously operator was going to pay, but the single-client constraint (§3) makes agent the only runtime signer, so agent covers every `submit_message` call driven by AgentService's outbox worker.
+- Agent therefore needs its own balance monitoring + low-balance Slack alert (same `#non-prod-oncall-fund-treasury` / `#oncall-fund-treasury` channels as treasury).
+- Keep payloads compact — every 100 bytes saved = ~$0.00011/event. (Payload-shape choice now lives in AgentService's Go `audit.BuildEnvelope` — not this MCP.)
 - Testnet for all dev + UAT.
+
+**Operator** (cold, bootstrap-only) pays only the one-time topic-create fees (~$0.01 per env) when Anand runs `scripts/bootstrap-audit-topic.ts`. No ongoing cost.
+
+**Treasury** (cold) pays only the periodic allowance-approve transaction fees (~$0.0001 each, nightly) when ops tops up the agent's refund allowance.
 
 ## 11. Out of scope for v1 / deferred
 
@@ -205,54 +223,61 @@ Per-message HCS fee ~$0.0002 (300-byte payload). At 10k bookings/day × ~5 event
 
 ## 12. Scenarios captured for future phases
 
-| Scenario | MoR | Fee mechanism | v1? |
-|---|---|---|---|
-| 1. Xeni-MoR | `xeni_treasury` | Extracted from user payment (internal) | ✅ |
-| 2. Customer-MoR, invoice | Customer treasury | Invoiced periodically | Phase 5 |
-| 3. Customer-MoR, prepaid | Customer treasury | Drawn from prepaid deposit | Phase 5 |
+| Scenario                 | MoR               | Fee mechanism                          | v1?     |
+| ------------------------ | ----------------- | -------------------------------------- | ------- |
+| 1. Xeni-MoR              | `xeni_treasury`   | Extracted from user payment (internal) | ✅      |
+| 2. Customer-MoR, invoice | Customer treasury | Invoiced periodically                  | Phase 5 |
+| 3. Customer-MoR, prepaid | Customer treasury | Drawn from prepaid deposit             | Phase 5 |
 
 ## 13. Audit durability (outbox pattern)
 
-**Problem.** Hedera transfers are irreversible. If a transfer succeeds on-chain but the HCS audit submit fails (network, congestion, operator balance), we have a silent audit gap. If HCS is submitted before the transfer is confirmed, we risk phantom audit events.
+**Problem.** Hedera transfers are irreversible. If a transfer succeeds on-chain but the HCS audit submit fails (network, congestion, low balance), we have a silent audit gap. If HCS is submitted before the transfer is confirmed, we risk phantom audit events.
 
-**Solution — outbox pattern.** MCP plugin never submits HCS; it only builds an envelope. AgentService persists the envelope to an outbox table; a worker drains the outbox by calling MCP's `submit_message` tool.
+**Solution — outbox pattern, entirely AgentService-side.** MCP just executes upstream tools and returns receipts. AgentService does all guard checks before calling, builds the envelope locally after the receipt comes back, persists to the outbox in the same DB transaction as the intent state update, and drains the outbox asynchronously via MCP's plain `submit_message` tool.
 
-### Hook + data flow
+### Data flow (post-pivot)
 
 ```
-┌───────────────────────────────────────────────────────────────────┐
-│ AgentService                                                       │
-│                                                                    │
-│  1. Receive: "execute payment, intent=X, amount=$10"               │
-│  2. MCP call (stdio) ──────────────────────────────┐               │
-│                                                    │               │
-│  8. Write outbox row:                              │               │
-│     (intent_id, event, payload, status=pending) ◀──┤               │
-│                                                    │               │
-│  9. Return success to caller                       │               │
-└─────────────────────────────────────────────┬──────┼───────────────┘
-                                              │      │
-                              stdio/JSON-RPC  │      │ response:
-                                              ▼      │ { receipt,
-┌─────────────────────────────────────────────────── │   auditEnvelope }
-│ hedera-xeni-mcp-server                             │               │
-│                                                    │               │
-│  3. preNormalize hooks (run BEFORE tx construction):               │
-│       spendPolicyGuard          (reject over ceiling)              │
-│       mandateBudgetGuard        (reject over remaining)            │
-│       treasuryAllowanceGuard    (refund path only)                 │
-│                                                                    │
-│  4. coreAction:                                                    │
-│       HederaBuilder → TransferTransaction                          │
-│       tx.execute(agentClient)                                      │
-│       await getReceipt                                             │
-│                                                                    │
-│  5. postCore hook (runs ONLY if coreAction succeeded):             │
-│       auditEnvelopeBuilder                                         │
-│       → produces { event, event_id, intent_id, txId, ... }         │
-│       → NO HCS submit here                                         │
-│                                                                    │
-│  6. Return: { receipt, auditEnvelope } ────────────┘               │
+┌────────────────────────────────────────────────────────────────────┐
+│ AgentService (Go)                                                   │
+│                                                                     │
+│  1. Receive: "execute payment, intent=X, amount=$10"                │
+│                                                                     │
+│  2. Pre-call guards (fail-fast; no MCP round-trip on reject):       │
+│       spendPolicyGuard      (allowance ≤ user policy ceiling)       │
+│       mandateBudgetGuard    (amount ≤ mandate remaining)            │
+│       treasuryAllowanceGuard (refund only — Mirror Node + Slack)    │
+│                                                                     │
+│  3. MCP call (stdio) ──────────────────────────────┐                │
+│                                                    │                │
+│  7. Receive raw Hedera receipt                     │                │
+│                                                    │                │
+│  8. AgentService.audit.BuildEnvelope(receipt, intent, fees):        │
+│       { schema_version, event_id (UUID v4), tx_timestamp,           │
+│         intent_id, customer_id, user, total, destination,           │
+│         split_accounting, booking_ref, txId, ... }                  │
+│                                                                     │
+│  9. DB transaction:                                                 │
+│       UPDATE intent SET state = ...                                 │
+│       INSERT INTO hedera_audit_outbox (payload_json, status=pending)│
+│                                                                     │
+│ 10. Return success to caller                                        │
+└─────────────────────────────────────────────┬──────────┼────────────┘
+                                              │          │
+                              stdio/JSON-RPC  │          │ response:
+                                              ▼          │ receipt only
+┌─────────────────────────────────────────────────────── │            ┐
+│ hedera-xeni-mcp-server                                 │            │
+│   (thin — no Xeni hooks, no plugin)                    │            │
+│                                                        │            │
+│  4. upstream tool execute(agentClient, context, params):            │
+│       HederaBuilder → TransferTransaction                           │
+│       tx.execute(agentClient)                                       │
+│       await getReceipt                                              │
+│                                                                     │
+│  5. upstream handler returns: string text of receipt                │
+│                                                                     │
+│  6. MCP transport serializes + returns ─────────────┘               │
 └────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────┐
@@ -295,15 +320,15 @@ hedera_audit_outbox (
 
 ### Invariants
 
-- No audit envelope exists for a failed transfer (enforced by `postCoreActionHook` only running on success).
-- Every successful transfer produces exactly one outbox row (AgentService writes it in the same transaction that updates intent state).
+- No audit envelope exists for a failed transfer — AgentService builds the envelope **only after receiving a SUCCESS receipt from the MCP**. On MCP error or rejected guards, no envelope, no outbox row.
+- Every successful transfer produces exactly one outbox row (AgentService writes intent state update + outbox insert in the same DB transaction).
 - Every outbox row eventually reaches `done` or `dead_letter`.
 - HCS is strictly eventually-consistent from the outbox's point of view; lag is observable via `outbox_depth` metric.
-- **Double-submit invariant:** if the worker submits to HCS successfully but crashes before `UPDATE status=done`, retry will resubmit the same payload. HCS does not dedupe natively. **Consumers MUST dedupe by `event_id`** (UUID v4 from §5 schema). The consumer-side dedup test (prove that two submissions with the same `event_id` produce one consumer-visible record) belongs in **AgentService's outbox test suite** — not this repo, since this repo has no consumer. This repo's §14 Unit gate covers the **producer-side guarantee**: every `auditEnvelopeBuilder` call emits a unique `event_id`. (Already tested at `test/unit/auditEnvelopeBuilder.test.ts` → `generates a distinct event_id per call`.)
+- **Double-submit invariant:** if the worker submits to HCS successfully but crashes before `UPDATE status=done`, retry will resubmit the same payload. HCS does not dedupe natively. **Consumers MUST dedupe by `event_id`** (UUID v4 from §5 schema). Both producer-side uniqueness and consumer-side dedup tests now live in AgentService's test suite (post-pivot). TS reference implementation in `reference-impl/hooks/auditEnvelopeBuilder.ts` + tests serves as a behavioral spec for AgentService's Go port — the TS tests still run in this repo's CI as executable specifications.
 
 ### Known gap (deferred to Phase 2)
 
-*MCP crashes between `execute()` and returning the response to AgentService.* The transfer is on-chain but AgentService sees tool-call failure → no outbox row → audit gap by a different route. Mitigation: a reconciliation worker that queries Hedera Mirror Node for any intent in `payment_status=unknown` past a threshold, and backfills the outbox. Deferred because POC-stage probability is low and the fix is additive (no schema change).
+_MCP crashes between `execute()` and returning the response to AgentService._ The transfer is on-chain but AgentService sees tool-call failure → no outbox row → audit gap by a different route. Mitigation: a reconciliation worker that queries Hedera Mirror Node for any intent in `payment_status=unknown` past a threshold, and backfills the outbox. Deferred because POC-stage probability is low and the fix is additive (no schema change).
 
 ### Mirror Node scale
 
@@ -325,44 +350,54 @@ Unchanged. HCS submits still cost ~$0.0002 each; the outbox adds DB storage (tri
 
 ## 14. Testing strategy
 
-| Layer | Scope | Tooling | CI gate |
-|---|---|---|---|
-| **Unit** | Each of the 4 hooks + 1 policy in isolation. Assert inputs → outputs, reject conditions, Slack payload shape. Includes **producer-side `event_id` uniqueness test** (MCP half of the P3 invariant; the consumer-side dedup test belongs in AgentService's outbox test suite — see §13). | `vitest` | **Required** on every PR |
-| **Integration** | Plugin wired into a `HederaMCPToolkit` instance with `hedera-agent-kit` test doubles. Verify hook stages fire in the right order, `auditEnvelopeBuilder` runs only on success, `accountResolver` picks the right `Client`. | `vitest` + manual test doubles | **Required** on every PR |
-| **E2E (testnet)** | Real testnet MCP server, real Hedera testnet, real operator/agent/treasury accounts (Anand-funded). Exercises (a) User→Agent allowance grant via RETURN_BYTES, (b) `transfer_hbar_with_allowance` payment, (c) refund via treasury→agent allowance, (d) audit envelope round-trip matches schema. | `vitest --project=e2e` + `@hiero-ledger/sdk` testnet client | **Nightly** on `testnet-ci` (not per-PR — testnet HBAR cost + latency) |
-| **Smoke (post-deploy)** | Cutover-day sanity: one booking intent end-to-end on `testnet-uat` with AgentService integrated. Under §15 cutover step 7. | Manual checklist | Manual gate before mainnet promotion |
+**Post-pivot:** the MCP test surface is much smaller. Runtime-executed code in this repo is just server wiring + transports + bootstrap scripts + `accounts.ts` + `logger.ts`. The 68 tests from PR #4/#5/#6 move to `reference-impl/tests/` and **continue to run in this repo's CI as executable specifications** for the AgentService Go port — they validate the TS reference implementations against their documented contracts. AgentService's own test suite (Go) owns the production-path guard tests.
 
-**Testnet account funding:** Anand owns funding operator/agent/treasury testnet accounts across `dev`, `testnet-ci`, `testnet-uat`. Runbook step: low-balance Slack alert to `#non-prod-oncall-fund-treasury`.
+| Layer                    | Scope                                                                                                                                                                                                                                                                                                                                                                            | Tooling                                                     | CI gate                                                                |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **MCP runtime unit**     | `accounts.ts` env validation + fail-loud on missing vars; `logger.ts` level gating + UTC formatting; `server.ts` fail-open/closed loader (if retained) + HTTP-in-prod refusal; transport loopback-only assertion.                                                                                                                                                                | `vitest`                                                    | **Required** on every PR                                               |
+| **MCP integration**      | `HederaMCPToolkit` instantiated with a test operator account; exposed tool list matches expectation; stdio transport accepts a MCP init handshake. Mock the `Client` or use a short-lived testnet stub.                                                                                                                                                                          | `vitest`                                                    | **Required** on every PR                                               |
+| **Reference-impl specs** | TS implementations of `spendPolicyGuard`, `mandateBudgetGuard`, `treasuryAllowanceGuard`, `auditEnvelopeBuilder`, `hbar.ts`, `fees/*` in `reference-impl/` with their PR #4–#6 vitest suites. Validates the behavioral contract for AgentService's Go port — not executed by the MCP at runtime.                                                                                 | `vitest`                                                    | **Required** on every PR (guards the contract)                         |
+| **E2E (testnet)**        | Real testnet MCP server, real Hedera testnet, real agent account (Anand-funded). Exercises: (a) User→Agent allowance grant flow (MCP builds unsigned bytes in RETURN_BYTES mode), (b) `transfer_hbar_with_allowance` payment, (c) refund via treasury→agent allowance, (d) `submit_message` round-trip. Envelope-building is AgentService's responsibility — not exercised here. | `vitest --project=e2e` + `@hiero-ledger/sdk` testnet client | **Nightly** on `testnet-ci` (not per-PR — testnet HBAR cost + latency) |
+| **Smoke (post-deploy)**  | Cutover-day sanity: one booking intent end-to-end on `testnet-uat` with AgentService integrated. Under §15 cutover step 7.                                                                                                                                                                                                                                                       | Manual checklist                                            | Manual gate before mainnet promotion                                   |
+
+**Testnet account funding:** Anand owns funding the agent testnet account across `dev`, `testnet-ci`, `testnet-uat`. (Operator + treasury are cold — funded once at bootstrap; don't burn ongoing testnet HBAR.) Runbook: low-balance Slack alert to `#non-prod-oncall-fund-treasury`.
 
 `TODO(p2):` testnet balance threshold — define a concrete number (e.g. "7 days of expected burn" in HBAR). Fill in [RUNBOOKS.md](RUNBOOKS.md) after first UAT gives a burn-rate data point.
 
 **Not in v1 test scope:**
+
 - Hedera SDK internals (upstream's tests cover).
 - `hedera-agent-kit` internals (upstream's tests cover; we pin an exact version).
+- AgentService-side guard/envelope tests (live in AgentService's Go suite, covered by its own CI — see [HANDOVER_TO_AGENT_SERVICE.md](HANDOVER_TO_AGENT_SERVICE.md) for port targets).
 - Mainnet flows (smoke only; full E2E on testnet).
 - Load / stress testing (Phase 2 when we know the volume profile).
 
-**CI coverage targets:** ≥ 80% statements on our 4 hooks + 1 policy. Hooks are pure functions with narrow IO; high coverage should be cheap.
+**CI coverage targets:**
+
+- **Runtime code (`src/`):** ≥80% statements once wiring lands (PR #10 onwards). Narrow surface.
+- **Reference-impl (`reference-impl/`):** 100% maintained — these are behavioral specs, any uncovered code is a spec-gap risk. Fail the gate on regression.
 
 ## 15. Migration & cutover
 
 **Team rule (see internal memory `feedback_migrations_standalone.md`):** DB schema changes + data migrations + on-chain bootstrap are **standalone deployment steps, never run on server startup**. Anand owns running them; each buddy writes + tests the script and submits a Migration Action Item in the project coordination log.
 
 **Implications for this repo:**
+
 - `package.json` has **no `prestart` migration hook**. MCP server boots cleanly assuming all bootstrap state already exists.
 - On-chain bootstrap scripts live in `scripts/` (not `src/`) and are invoked manually by Anand per env.
 - If required env vars are missing at startup, the server fails loudly — never auto-creates.
 
 **Migration action items for cutover:**
 
-| ID | Owner | Title | Script |
-|---|---|---|---|
-| M1 | AIAgent Service Buddy | Drop `hcs_topic_id` column from `intent` table | AgentService PR |
-| M2 | AIAgent Service Buddy | Create `hedera_audit_outbox` table (schema in §13) | AgentService PR |
-| M3 | Hedera Buddy | Create global `xeni_audit` HCS topic (one per env) | `scripts/bootstrap-audit-topic.ts` |
-| M4 | Hedera Buddy | Bootstrap dedicated treasury account + treasury→agent refund allowance | `scripts/bootstrap-treasury.ts` |
+| ID  | Owner                 | Title                                                                  | Script                             |
+| --- | --------------------- | ---------------------------------------------------------------------- | ---------------------------------- |
+| M1  | AIAgent Service Buddy | Drop `hcs_topic_id` column from `intent` table                         | AgentService PR                    |
+| M2  | AIAgent Service Buddy | Create `hedera_audit_outbox` table (schema in §13)                     | AgentService PR                    |
+| M3  | Hedera Buddy          | Create global `xeni_audit` HCS topic (one per env)                     | `scripts/bootstrap-audit-topic.ts` |
+| M4  | Hedera Buddy          | Bootstrap dedicated treasury account + treasury→agent refund allowance | `scripts/bootstrap-treasury.ts`    |
 
 **Each script must:**
+
 - Be idempotent (re-runnable mid-failure), or include a clear state-check preamble so Anand can tell what's already applied.
 - Log every row/state-affecting operation.
 - Fit on one screen of instructions: "run this file, expect this output, verify this count / topic ID / account ID."
@@ -390,42 +425,28 @@ Unchanged. HCS submits still cost ~$0.0002 each; the outbox adds DB storage (tri
 
 **None.** Old `xeni-hedera-mcp-server` was a test — no live intents to drain. Cutover is a clean cut.
 
-## 16. Canonical MCP response shape
+## 16. Canonical MCP response shape (post-pivot — just receipt)
 
-Tool calls from this MCP return:
+Tool calls from this MCP return the raw Hedera receipt only. AgentService builds the audit envelope itself (post-pivot — the `auditEnvelope` field that used to be bundled here is gone).
 
 ```json
 {
-  "receipt": {
-    "status": "SUCCESS",
-    "txId": "0.0.agent@1745612345.123456789",
-    "consensus_timestamp": "2026-04-18T22:15:03.123456789Z",
-    "network": "testnet",
-    "topic_sequence_number": null,
-    "topic_running_hash": null
-  },
-  "auditEnvelope": {
-    "schema_version": 1,
-    "event_id": "4f9c8a12-...",
-    "event": "payment_executed",
-    "tx_timestamp": "2026-04-18T22:15:03Z",
-    "intent_id": "...",
-    "customer_id": "...",
-    "user": "0.0.userA",
-    "total": 10.0,
-    "destination": "xeni_treasury",
-    "split_accounting": { "supplier_cost": 8.0, "platform_fee": 1.0, "customer_commission": 1.0 },
-    "booking_ref": "...",
-    "txId": "0.0.agent@1745612345.123456789",
-    "remaining_user_allowance": 90.0
-  }
+  "status": "SUCCESS",
+  "txId": "0.0.agent@1745612345.123456789",
+  "consensus_timestamp": "2026-04-18T22:15:03.123456789Z",
+  "network": "testnet",
+  "topic_sequence_number": null,
+  "topic_running_hash": null
 }
 ```
 
-- `receipt.topic_sequence_number` / `topic_running_hash` populated **only** for `submit_message` responses; omitted for transfer responses.
-- `receipt.txId` and `auditEnvelope.txId` are the same value by design — receipt is the raw Hedera artifact, envelope is the durable audit record. Redundant so either stands alone.
-- `event_id` generated by `auditEnvelopeBuilder` in this MCP (not by AgentService). AgentService stores the ID unchanged for consumer-side dedup.
-- Nulls omitted, not sent as `null`.
+Notes:
+
+- `topic_sequence_number` / `topic_running_hash` populated **only** on `submit_message` responses; omitted (not `null`) on transfer responses.
+- `consensus_timestamp` is the authoritative source of truth for audit timing. AgentService passes this to its Go `audit.BuildEnvelope(...)` as the `tx_timestamp` input.
+- Null optional fields are omitted per the null-omission rule, not sent as literal `null`.
+
+**Retired contract:** the previous `{ receipt, auditEnvelope }` envelope-bundled shape is gone. AgentService constructs envelopes locally from this receipt + its intent state; see [HANDOVER_TO_AGENT_SERVICE.md](HANDOVER_TO_AGENT_SERVICE.md) for the Go port spec.
 
 ## Scaffold checklist (tracked — what this PR delivers)
 
@@ -444,6 +465,7 @@ Tool calls from this MCP return:
 - [x] `.github/workflows/ci.yml` with unit + integration gates
 
 **Not in this scaffold** (lands in implementation PRs):
+
 - Actual hook logic.
 - Actual bootstrap-script execution logic (skeleton + state-check pattern only).
 - E2E test project setup.
