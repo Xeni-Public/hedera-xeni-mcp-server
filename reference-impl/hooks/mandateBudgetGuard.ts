@@ -21,7 +21,7 @@
  *   - amountHbar  > remaining → reject
  */
 
-import { log } from '../../../logger.js';
+import { log } from '../logger.js';
 import { fromTinybar, invalidNumberReason, toTinybar } from '../hbar.js';
 
 export interface MandateBudgetGuardInput {

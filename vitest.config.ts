@@ -2,39 +2,42 @@
 
 import { defineConfig } from 'vitest/config';
 
-// §14 Testing strategy — three projects, different CI cadences:
-//   unit:        runs on every PR          (required gate)
-//   integration: runs on every PR          (required gate)
-//   e2e:         runs nightly on testnet-ci (not per-PR; testnet HBAR cost + latency)
+// §14 Testing strategy:
+//   unit + reference-impl specs: runs on every PR (required gate)
+//   integration:                 runs on every PR (required gate)
+//   e2e:                         runs nightly on testnet-ci (not per-PR; testnet HBAR cost + latency)
+//
+// Post-pivot (PR #9): reference-impl/tests/ tests run alongside MCP unit tests.
+// They validate the behavioral contracts AgentService's Go port must match.
 export default defineConfig({
   test: {
-    // Project-based config requires vitest workspace setup; this is the minimal
-    // single-config starting point. Implementation PR splits into three projects.
-    include: ['test/unit/**/*.test.ts', 'test/integration/**/*.test.ts'],
+    include: [
+      'test/unit/**/*.test.ts',
+      'test/integration/**/*.test.ts',
+      'reference-impl/tests/**/*.test.ts',
+    ],
     exclude: ['test/e2e/**', 'node_modules/', 'dist/'],
     environment: 'node',
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
-      // Scaffold-state `include` is narrow on purpose: only the two fully-
-      // implemented modules are in scope for the 80% gate today. Each
-      // implementation PR MUST add its file(s) here as it lands its unit
-      // tests. This keeps the gate meaningful (high threshold on tested
-      // files) rather than faking it (low threshold on the whole tree).
+      // Coverage is scoped to reference-impl/ — the MCP runtime code in src/
+      // is skeletal as of PR #9 (real wiring lands PR #10). Once src/server.ts
+      // + transports wire up in PR #10, add `src/**/*.ts` here and tighten.
       //
-      // Target end state: `include: ['src/**/*.ts']` once all 4 hooks +
-      // policy + server + transports + fee calculators have their tests.
+      // reference-impl files maintain 100% coverage — they're behavioral specs
+      // for the Go port; any uncovered code is a spec-gap risk.
       include: [
-        'src/plugins/xeniIntentMandate/hbar.ts',
-        'src/plugins/xeniIntentMandate/hooks/auditEnvelopeBuilder.ts',
-        'src/plugins/xeniIntentMandate/hooks/mandateBudgetGuard.ts',
-        'src/plugins/xeniIntentMandate/hooks/spendPolicyGuard.ts',
-        'src/plugins/xeniIntentMandate/hooks/treasuryAllowanceGuard.ts',
-        'src/plugins/xeniIntentMandate/policies/accountResolver.ts',
+        'reference-impl/hbar.ts',
+        'reference-impl/hooks/auditEnvelopeBuilder.ts',
+        'reference-impl/hooks/mandateBudgetGuard.ts',
+        'reference-impl/hooks/spendPolicyGuard.ts',
+        'reference-impl/hooks/treasuryAllowanceGuard.ts',
+        'reference-impl/policies/accountResolver.ts',
       ],
-      exclude: ['src/**/*.d.ts', 'src/**/index.ts'],
+      exclude: ['**/*.d.ts', '**/index.ts'],
       thresholds: {
-        // §14: ≥80% coverage on hooks + policy (applied to `include` above)
+        // §14: ≥80% coverage; reference-impl files typically run at 100%
         statements: 80,
         branches: 75,
         functions: 80,

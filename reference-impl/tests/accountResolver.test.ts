@@ -1,12 +1,18 @@
 // Authored-by: Anand Palanisamy - anand@xeni.com
 
 /**
+ * ⚑ RETIRED post-pivot (2026-04-20). Kept running in CI to keep the
+ * reference policy module green, but the policy has no runtime consumer.
+ * Do NOT port to Go — see note at the top of the policy file.
+ *
+ * ---
+ *
  * accountResolver unit tests — covers the deterministic policy decisions per
- * DESIGN.md §6. Other hooks tested in their own files / skeleton stubs for now.
+ * DESIGN.md §6.
  */
 
 import { describe, expect, it } from 'vitest';
-import { resolveRole } from '../../src/plugins/xeniIntentMandate/policies/accountResolver.js';
+import { resolveRole } from '../policies/accountResolver.js';
 
 // Minimal registry stub — resolver doesn't actually query it for v1 but
 // the signature accepts one for future multi-customer routing (Phase 5).

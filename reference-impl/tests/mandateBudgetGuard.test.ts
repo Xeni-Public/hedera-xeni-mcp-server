@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mandateBudgetGuard } from '../../src/plugins/xeniIntentMandate/hooks/mandateBudgetGuard.js';
+import { mandateBudgetGuard } from '../hooks/mandateBudgetGuard.js';
 
 const baseInput = {
   amountHbar: 10,

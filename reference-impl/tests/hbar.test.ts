@@ -14,12 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  TINYBAR_PER_HBAR,
-  fromTinybar,
-  invalidNumberReason,
-  toTinybar,
-} from '../../src/plugins/xeniIntentMandate/hbar.js';
+import { TINYBAR_PER_HBAR, fromTinybar, invalidNumberReason, toTinybar } from '../hbar.js';
 
 describe('hbar', () => {
   describe('TINYBAR_PER_HBAR', () => {

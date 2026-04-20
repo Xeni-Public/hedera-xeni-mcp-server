@@ -21,13 +21,13 @@
     "bootstrap:audit-topic": "tsx scripts/bootstrap-audit-topic.ts",
     "bootstrap:treasury": "tsx scripts/bootstrap-treasury.ts",
     "test": "npm run test:unit && npm run test:integration",
-    "test:unit": "vitest run test/unit",
+    "test:unit": "vitest run test/unit reference-impl/tests",
     "test:integration": "vitest run test/integration",
     "test:e2e": "vitest run test/e2e",
     "test:watch": "vitest",
-    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.ts' 'test/**/*.ts'",
-    "format": "prettier --write 'src/**/*.ts' 'scripts/**/*.ts' 'test/**/*.ts' 'docs/**/*.md'",
-    "format:check": "prettier --check 'src/**/*.ts' 'scripts/**/*.ts' 'test/**/*.ts'"
+    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.ts' 'test/**/*.ts' 'reference-impl/**/*.ts'",
+    "format": "prettier --write 'src/**/*.ts' 'scripts/**/*.ts' 'test/**/*.ts' 'reference-impl/**/*.ts' 'docs/**/*.md'",
+    "format:check": "prettier --check 'src/**/*.ts' 'scripts/**/*.ts' 'test/**/*.ts' 'reference-impl/**/*.ts'"
   },
   "dependencies": {
     "@hashgraph/hedera-agent-kit": "4.0.0",

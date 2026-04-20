@@ -1,21 +1,20 @@
 // Authored-by: Anand Palanisamy - anand@xeni.com
 
 /**
- * Server bootstrap — wires HederaMCPToolkit with our plugin + fee-calculator
- * loader + account resolver. Called from both transports/stdio.ts and
- * transports/http.ts.
+ * Server bootstrap — wires HederaMCPToolkit with a single agent client.
+ * Called from both transports/stdio.ts and transports/http.ts.
  *
- * See docs/DESIGN.md §6, §7, §8.
+ * Post-pivot (2026-04-20): no custom plugins, no hooks, no policies, no
+ * fee calculator. Upstream tools are exposed as-is via the toolkit. See
+ * docs/DESIGN.md §6 (plugin surface is empty), §7 (no private logic),
+ * §8 (transport rules).
  */
 
-import { buildAccountRegistry } from './accounts.js';
-import { DefaultFeeCalculator } from './fees/DefaultFeeCalculator.js';
-import type { FeeCalculator } from './fees/FeeCalculator.js';
+import { loadAgentAccount } from './accounts.js';
 import { log } from './logger.js';
 
-// TODO: import HederaMCPToolkit from '@hashgraph/hedera-agent-kit-mcp' after first install
-// TODO: import core plugins (coreAccountPlugin, coreConsensusPlugin) from '@hashgraph/hedera-agent-kit'
-// TODO: import { xeniIntentMandatePlugin } from './plugins/xeniIntentMandate/index.js'
+// TODO (PR #10): import HederaMCPToolkit from '@hashgraph/hedera-agent-kit-mcp'
+// TODO (PR #10): import Client from '@hiero-ledger/sdk'
 
 export interface ServerConfig {
   network: 'testnet' | 'mainnet';
@@ -23,6 +22,7 @@ export interface ServerConfig {
   httpBind: string;
   httpPort: number;
   nodeEnv: 'development' | 'test' | 'production';
+  envLabel: string;
 }
 
 export function loadConfig(): ServerConfig {
@@ -41,80 +41,35 @@ export function loadConfig(): ServerConfig {
     httpBind: process.env['HEDERA_HTTP_BIND'] ?? '127.0.0.1',
     httpPort: Number(process.env['HEDERA_HTTP_PORT'] ?? '7701'),
     nodeEnv,
+    envLabel: process.env['HEDERA_ENV_LABEL'] ?? 'dev',
   };
 }
 
 /**
- * Load the fee calculator per docs/DESIGN.md §7:
- *   - dev: fail-open to DefaultFeeCalculator
- *   - test: fail-open
- *   - production: fail-closed (refuse to start if private plugin missing / fails)
- */
-// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await lands when the private plugin is dynamically imported (see TODO below).
-export async function loadFeeCalculator(config: ServerConfig): Promise<FeeCalculator> {
-  const privatePluginsEnv = process.env['HEDERA_XENI_PRIVATE_PLUGINS']?.trim();
-  const expectedImpl = process.env['EXPECTED_FEE_CALCULATOR_IMPL']?.trim();
-
-  let impl: FeeCalculator;
-
-  if (!privatePluginsEnv) {
-    if (config.nodeEnv === 'production') {
-      log.error('HEDERA_XENI_PRIVATE_PLUGINS required in production; refusing to start.');
-      process.exit(1);
-    }
-    log.info('Loaded fee calculator: DefaultFeeCalculator', { reason: 'no private plugin set' });
-    impl = new DefaultFeeCalculator();
-  } else {
-    try {
-      // TODO: dynamic import of the private plugin module — something like:
-      // const mod = await import(privatePluginsEnv);
-      // impl = new mod.PlatformFeeCalculator();
-      throw new Error('private plugin loader — scaffold skeleton; implementation lands in next PR');
-    } catch (err) {
-      if (config.nodeEnv === 'production') {
-        log.error(`Private plugin load failed; refusing to start: ${String(err)}`);
-        process.exit(1);
-      }
-      log.warn(`Private plugin load failed, falling back to DefaultFeeCalculator`, {
-        error: String(err),
-      });
-      impl = new DefaultFeeCalculator();
-    }
-  }
-
-  // Startup health check — assert loaded impl matches expectation if set.
-  if (expectedImpl && impl.name !== expectedImpl) {
-    log.error(`Fee calculator mismatch: loaded=${impl.name} expected=${expectedImpl}`);
-    process.exit(1);
-  }
-  log.info(`Loaded fee calculator: ${impl.name}`);
-
-  return impl;
-}
-
-/**
  * Build the HederaMCPToolkit instance. Transport-agnostic.
+ *
+ * Post-pivot implementation (wiring lands in PR #10):
+ *   1. Load agent account from env.
+ *   2. Construct a single `Client` with agent as operator on the configured network.
+ *   3. Instantiate `HederaMCPToolkit({ client, configuration })` — upstream
+ *      auto-registers every tool from its built-in plugins.
+ *   4. Return the toolkit so the transport can connect it.
+ *
+ * No custom plugin injection. No hooks. No policies. Upstream tools only.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await lands when upstream Client + HederaMCPToolkit are imported in PR #10.
 export async function buildToolkit(config: ServerConfig): Promise<unknown> {
-  const accounts = buildAccountRegistry();
-  // Exercise the fee-calculator loader so its fail-open/closed behavior is
-  // validated at startup. Result is intentionally discarded in this scaffold
-  // skeleton; the implementation PR captures it and threads it into the
-  // HederaMCPToolkit configuration.
-  await loadFeeCalculator(config);
+  const agent = loadAgentAccount();
 
-  log.info('Account registry initialized', {
-    operator: accounts.get('operator').accountId,
-    agent: accounts.get('agent').accountId,
-    xeni_treasury: accounts.get('xeni_treasury').accountId,
+  log.info('Loaded runtime agent account', {
+    accountId: agent.accountId,
+    network: config.network,
+    envLabel: config.envLabel,
   });
 
-  // TODO: construct two Clients (operator, agent) from @hiero-ledger/sdk
-  // TODO: construct HederaMCPToolkit({
-  //   plugins: [coreAccountPlugin, coreConsensusPlugin, xeniIntentMandatePlugin],
-  //   clientResolver: (tool) => resolveRole({ tool }, accounts) === 'operator' ? operatorClient : agentClient,
-  //   feeCalculator,
-  // })
-  // TODO: return the toolkit
-  throw new Error('buildToolkit: scaffold skeleton; implementation lands in next PR');
+  // TODO (PR #10): const client = Client.forName(config.network).setOperator(agent.accountId, agent.privateKey);
+  // TODO (PR #10): const toolkit = new HederaMCPToolkit({ client, configuration: { /* defaults */ } });
+  // TODO (PR #10): return toolkit;
+
+  throw new Error('buildToolkit: scaffold skeleton; upstream wiring lands in PR #10');
 }

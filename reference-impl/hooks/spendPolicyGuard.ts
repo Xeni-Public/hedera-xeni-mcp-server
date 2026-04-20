@@ -23,7 +23,7 @@
 // TODO: integrate with hook/Context types from '@hashgraph/hedera-agent-kit' when the
 // plugin is wired into HederaMCPToolkit (tracked for the server.buildToolkit impl PR).
 
-import { log } from '../../../logger.js';
+import { log } from '../logger.js';
 import { invalidNumberReason, toTinybar } from '../hbar.js';
 
 export interface SpendPolicyGuardInput {

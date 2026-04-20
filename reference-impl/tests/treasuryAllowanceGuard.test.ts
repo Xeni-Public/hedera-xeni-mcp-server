@@ -28,8 +28,8 @@ import type {
   SlackAlertPayload,
   TreasuryAllowanceGuardDeps,
   TreasuryAllowanceGuardInput,
-} from '../../src/plugins/xeniIntentMandate/hooks/treasuryAllowanceGuard.js';
-import { treasuryAllowanceGuard } from '../../src/plugins/xeniIntentMandate/hooks/treasuryAllowanceGuard.js';
+} from '../hooks/treasuryAllowanceGuard.js';
+import { treasuryAllowanceGuard } from '../hooks/treasuryAllowanceGuard.js';
 
 /** Build a deps object with sensible defaults. Override per-test as needed. */
 function makeDeps(overrides: Partial<TreasuryAllowanceGuardDeps> = {}): TreasuryAllowanceGuardDeps {
