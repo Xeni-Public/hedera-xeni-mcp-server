@@ -13,8 +13,9 @@
  * Scope:
  *   - Build the toolkit against testnet
  *   - Submit one small JSON payload to `HEDERA_XENI_AUDIT_TOPIC_ID`
- *   - Poll Mirror Node briefly until the message appears (up to ~10s —
- *     Mirror Node lag on testnet is usually 2–5s)
+ *   - Poll Mirror Node until the message appears (20s deadline — short
+ *     enough to keep the nightly tight, long enough to absorb indexing
+ *     spikes; typical testnet lag is 2–5s)
  *   - Assert payload round-trips intact
  *
  * Cost: ~$0.0001 per run (one HCS message submit + a few Mirror Node GETs).

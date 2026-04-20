@@ -131,12 +131,19 @@ describe.skipIf(missing.length > 0)('E2E / bootstrap idempotency (real Mirror No
       printStdout: depOverrides.printStdout,
     };
 
+    // Set balance + allowance to 0 deliberately: the re-use path does NOT
+    // consume these values (it returns before `createTreasury` /
+    // `grantAllowance` fire). Using 0 means a regression that DOES start
+    // consuming them in the re-use path would fail obviously — either via
+    // a "non-positive amount" error from the Hiero SDK, or a WARN log
+    // about "allowance exceeds balance" when both are zero. Matches the
+    // throw-if-called-stubs spirit of making regressions loud.
     const result = await runTreasuryBootstrap(
       {
         env,
         agentId,
-        initialBalanceHbar: 30000,
-        initialAllowanceHbar: 10000,
+        initialBalanceHbar: 0,
+        initialAllowanceHbar: 0,
         existingTreasuryId,
       },
       deps,

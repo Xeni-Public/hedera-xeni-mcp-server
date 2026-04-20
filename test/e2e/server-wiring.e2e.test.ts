@@ -72,6 +72,14 @@ describe.skipIf(missing.length > 0)('E2E / server wiring (real testnet)', () => 
       // to the real types (via `unknown`) rather than `any` so lint stays
       // clean — the tool implementation accepts these parameter types
       // structurally, not nominally.
+      //
+      // MIGRATION NOTE: if this tool ever starts using the Client (e.g.
+      // for an on-chain read via Hiero SDK instead of Mirror Node REST),
+      // swap these stubs for real instances:
+      //   const agentKey = PrivateKey.fromStringECDSA(process.env['HEDERA_AGENT_KEY']!);
+      //   const client = Client.forName(network).setOperator(agentId, agentKey);
+      //   // ... wrap the test body in try/finally with client.close() to avoid
+      //   // lingering gRPC sockets in nightly CI.
       const client = {} as unknown as Client;
       const context = { accountId: agentId } as unknown as Context;
 
