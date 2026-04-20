@@ -76,10 +76,7 @@ describe('treasuryAllowanceGuard', () => {
   describe('rejects by allowance', () => {
     it('rejects when amount exceeds current remaining', async () => {
       const deps = makeDeps({ queryRemainingAllowanceHbar: () => Promise.resolve(5) });
-      const result = await treasuryAllowanceGuard(
-        { ...baseInput, amountHbar: 10 },
-        deps,
-      );
+      const result = await treasuryAllowanceGuard({ ...baseInput, amountHbar: 10 }, deps);
       expect(result.passed).toBe(false);
       expect(result.reason).toMatch(/exceeds remaining/i);
       expect(result.reason).toContain('10 HBAR');
@@ -225,10 +222,7 @@ describe('treasuryAllowanceGuard', () => {
         queryRemainingAllowanceHbar: () => Promise.resolve(2_500),
         sendSlackAlert,
       });
-      await treasuryAllowanceGuard(
-        { ...baseInput, amountHbar: 600, fiatPerHbar: 0.2 },
-        deps,
-      );
+      await treasuryAllowanceGuard({ ...baseInput, amountHbar: 600, fiatPerHbar: 0.2 }, deps);
 
       const payload = sendSlackAlert.mock.calls[0]?.[0] as SlackAlertPayload;
       expect(payload.fiatPerHbar).toBe(0.2);
@@ -286,10 +280,7 @@ describe('treasuryAllowanceGuard', () => {
   describe('floating-point safety', () => {
     it('handles 0.1 + 0.2 amount against 0.3 remaining without false-rejecting', async () => {
       const deps = makeDeps({ queryRemainingAllowanceHbar: () => Promise.resolve(0.3) });
-      const result = await treasuryAllowanceGuard(
-        { ...baseInput, amountHbar: 0.1 + 0.2 },
-        deps,
-      );
+      const result = await treasuryAllowanceGuard({ ...baseInput, amountHbar: 0.1 + 0.2 }, deps);
       expect(result.passed).toBe(true);
     });
   });

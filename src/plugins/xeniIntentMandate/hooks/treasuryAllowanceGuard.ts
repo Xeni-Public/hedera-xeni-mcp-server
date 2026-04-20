@@ -118,13 +118,8 @@ export async function treasuryAllowanceGuard(
   deps: TreasuryAllowanceGuardDeps,
 ): Promise<TreasuryAllowanceGuardResult> {
   const { amountHbar, intentId, correlationId, fiatPerHbar } = input;
-  const {
-    queryRemainingAllowanceHbar,
-    sendSlackAlert,
-    dailyCapHbar,
-    thresholdFraction,
-    envLabel,
-  } = deps;
+  const { queryRemainingAllowanceHbar, sendSlackAlert, dailyCapHbar, thresholdFraction, envLabel } =
+    deps;
 
   // --- 1. Input validation (fail-closed) ---
   const amountInvalid = invalidNumberReason(amountHbar, 'amountHbar');
