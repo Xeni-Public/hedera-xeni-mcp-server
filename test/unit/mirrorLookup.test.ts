@@ -11,6 +11,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import {
+  fetchAccountMemo,
   fetchAccountPublicKey,
   findTopicByMemo,
   mirrorNodeBaseUrl,
@@ -193,5 +194,57 @@ describe('mirrorLookup / fetchAccountPublicKey', () => {
     await fetchAccountPublicKey('0.0/1002', 'testnet', { fetchImpl });
     const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(url).toContain('0.0%2F1002');
+  });
+});
+
+describe('mirrorLookup / fetchAccountMemo', () => {
+  it('returns the memo string on happy path', async () => {
+    const fetchImpl = mockFetch({
+      body: { account: '0.0.2001', memo: 'xeni_treasury_v1_testnet-uat' },
+    });
+    const memo = await fetchAccountMemo('0.0.2001', 'testnet', { fetchImpl });
+    expect(memo).toBe('xeni_treasury_v1_testnet-uat');
+  });
+
+  it('returns null when the account has no memo (empty or missing field)', async () => {
+    const fetchImpl = mockFetch({ body: { account: '0.0.2001' } });
+    const memo = await fetchAccountMemo('0.0.2001', 'testnet', { fetchImpl });
+    expect(memo).toBeNull();
+  });
+
+  it('returns empty string when memo is explicitly empty', async () => {
+    const fetchImpl = mockFetch({ body: { account: '0.0.2001', memo: '' } });
+    const memo = await fetchAccountMemo('0.0.2001', 'testnet', { fetchImpl });
+    expect(memo).toBe('');
+  });
+
+  it('throws on HTTP 404 (account not found)', async () => {
+    const fetchImpl = mockFetch({ ok: false, status: 404 });
+    await expect(fetchAccountMemo('0.0.9999', 'testnet', { fetchImpl })).rejects.toThrow(
+      /HTTP 404/,
+    );
+  });
+
+  it('throws on non-object response (defensive)', async () => {
+    const fetchImpl: FetchFn = vi.fn(
+      // eslint-disable-next-line @typescript-eslint/require-await -- mock
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await -- mock
+          json: async () => 'string-not-object',
+        }) as unknown as Response,
+    );
+    await expect(fetchAccountMemo('0.0.2001', 'testnet', { fetchImpl })).rejects.toThrow(
+      /non-object body/,
+    );
+  });
+
+  it('URL-encodes the account ID in the path', async () => {
+    const fetchImpl = mockFetch({ body: { account: '0.0/2001', memo: 'x' } });
+    await fetchAccountMemo('0.0/2001', 'testnet', { fetchImpl });
+    const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    expect(url).toContain('0.0%2F2001');
   });
 });
