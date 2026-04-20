@@ -98,6 +98,15 @@ interface MirrorTopicListResponse {
  *
  * Kept defensive: if the response shape is unexpected, throw loudly with
  * a snippet — consistent with the rest of our Mirror Node wrappers.
+ *
+ * Scale note: we page through Mirror Node results in descending order
+ * (most-recent first) until the memo is found or pages are exhausted.
+ * At v1 scale (one `xeni_audit` topic per env × ~4 envs under the
+ * operator) this is O(1). If a future operator ever accumulates tens of
+ * thousands of topics AND the target `xeni_audit_v1_<env>` memo is on an
+ * old page, this walk is linear in page count — still correct, just not
+ * constant-time. No silent cap: if pages run out without a match, we
+ * return `null` and the caller creates a fresh topic.
  */
 export async function findTopicByMemo(
   operatorId: string,
@@ -106,6 +115,9 @@ export async function findTopicByMemo(
   options: LookupOptions = {},
 ): Promise<string | null> {
   const baseUrl = options.baseUrl ?? mirrorNodeBaseUrl(network);
+  // `order=desc` puts the most-recently-created topic first — for the
+  // common case (ops re-running M3 to confirm the recent topic), we match
+  // on page 1 and never paginate.
   let url: string | null =
     `${baseUrl}/api/v1/topics?account.id=${encodeURIComponent(operatorId)}&limit=100&order=desc`;
 

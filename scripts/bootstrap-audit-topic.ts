@@ -199,6 +199,8 @@ export async function createTopicViaSdk(args: {
     const receipt = await tx.getReceipt(client);
     const topicId: TopicId | null = receipt.topicId;
     if (!topicId) {
+      // `finally` below closes the client on both success AND throw —
+      // no explicit client.close() needed here.
       throw new Error('TopicCreateTransaction receipt did not include a topicId — unexpected.');
     }
     return {
