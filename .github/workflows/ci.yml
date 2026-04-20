@@ -71,6 +71,12 @@ jobs:
         env:
           NODE_ENV: test
           HEDERA_NETWORK: testnet
+          # Env label used by bootstrap idempotency tests — must match the
+          # label used when ops bootstrapped the testnet-ci topic + treasury
+          # (so memo `xeni_audit_v1_testnet-ci` / `xeni_treasury_v1_testnet-ci`
+          # verify correctly). See scripts/bootstrap-*.ts and
+          # test/e2e/bootstrap-idempotency.e2e.test.ts.
+          HEDERA_ENV_LABEL: testnet-ci
           HEDERA_OPERATOR_ID: ${{ secrets.TESTNET_CI_OPERATOR_ID }}
           HEDERA_OPERATOR_KEY: ${{ secrets.TESTNET_CI_OPERATOR_KEY }}
           HEDERA_AGENT_ID: ${{ secrets.TESTNET_CI_AGENT_ID }}
