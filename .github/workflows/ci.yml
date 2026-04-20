@@ -40,15 +40,11 @@ jobs:
       - name: Type-check + Build
         run: npm run build
 
-      - name: Unit tests
-        run: npm run test:unit
-
-      - name: Integration tests
-        run: npm run test:integration
-
-      - name: Coverage (informational)
-        run: npm run test:unit -- --coverage
-        continue-on-error: true
+      - name: Test + coverage (unit + integration + reference-impl)
+        # `npm test` runs vitest with the config `include` glob, covering
+        # test/unit/, test/integration/, and reference-impl/tests/ in one
+        # pass. Coverage is gated (thresholds in vitest.config.ts §14).
+        run: npm test -- --coverage
 
   # E2E runs on a schedule, not on every PR (docs/DESIGN.md §14).
   # Reason: testnet HBAR cost + latency.

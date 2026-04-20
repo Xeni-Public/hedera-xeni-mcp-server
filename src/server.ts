@@ -1,20 +1,22 @@
 // Authored-by: Anand Palanisamy - anand@xeni.com
 
 /**
- * Server bootstrap — wires HederaMCPToolkit with a single agent client.
- * Called from both transports/stdio.ts and transports/http.ts.
+ * Server bootstrap — wires HederaMCPToolkit with a single agent client +
+ * upstream core plugins. Called from both transports/stdio.ts and
+ * transports/http.ts.
  *
- * Post-pivot (2026-04-20): no custom plugins, no hooks, no policies, no
- * fee calculator. Upstream tools are exposed as-is via the toolkit. See
- * docs/DESIGN.md §6 (plugin surface is empty), §7 (no private logic),
- * §8 (transport rules).
+ * Post-pivot (see docs/DESIGN.md §6): no Xeni-custom plugins, no hooks,
+ * no policies, no fee calculator. Upstream core plugins are registered
+ * explicitly (ToolDiscovery defaults to `[]` with no plugins passed, so
+ * we MUST name the core set ourselves).
  */
 
+import { AgentMode } from '@hashgraph/hedera-agent-kit';
+import { allCorePlugins } from '@hashgraph/hedera-agent-kit/plugins';
+import { HederaMCPToolkit } from '@hashgraph/hedera-agent-kit-mcp';
+import { Client, PrivateKey } from '@hiero-ledger/sdk';
 import { loadAgentAccount } from './accounts.js';
 import { log } from './logger.js';
-
-// TODO (PR #10): import HederaMCPToolkit from '@hashgraph/hedera-agent-kit-mcp'
-// TODO (PR #10): import Client from '@hiero-ledger/sdk'
 
 export interface ServerConfig {
   network: 'testnet' | 'mainnet';
@@ -46,30 +48,49 @@ export function loadConfig(): ServerConfig {
 }
 
 /**
- * Build the HederaMCPToolkit instance. Transport-agnostic.
+ * Build the HederaMCPToolkit instance. Transport-agnostic — callers
+ * (`transports/stdio.ts`, `transports/http.ts`) connect the returned
+ * toolkit to their chosen transport via `toolkit.connect(transport)`.
  *
- * Post-pivot implementation (wiring lands in PR #10):
- *   1. Load agent account from env.
- *   2. Construct a single `Client` with agent as operator on the configured network.
- *   3. Instantiate `HederaMCPToolkit({ client, configuration })` — upstream
- *      auto-registers every tool from its built-in plugins.
- *   4. Return the toolkit so the transport can connect it.
+ * Registers all upstream core plugins explicitly. Upstream's
+ * `ToolDiscovery.createFromConfiguration` treats `configuration.plugins`
+ * as `|| []`, so without this list we'd expose zero tools.
  *
- * No custom plugin injection. No hooks. No policies. Upstream tools only.
+ * Default `AgentMode.AUTONOMOUS` — the server signs every tool
+ * transaction with the agent key. RETURN_BYTES mode is not exposed
+ * here; user-signed flows (e.g. User A granting an allowance to the
+ * agent) are handled by AgentService constructing transaction bytes
+ * directly via `@hashgraph/sdk-go`, not through this MCP.
  */
-// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await lands when upstream Client + HederaMCPToolkit are imported in PR #10.
-export async function buildToolkit(config: ServerConfig): Promise<unknown> {
+export function buildToolkit(config: ServerConfig): HederaMCPToolkit {
   const agent = loadAgentAccount();
 
-  log.info('Loaded runtime agent account', {
-    accountId: agent.accountId,
+  // Parse + validate the key at boot — fail loud if malformed.
+  const agentPrivateKey = PrivateKey.fromStringECDSA(agent.privateKey);
+
+  const client = Client.forName(config.network).setOperator(agent.accountId, agentPrivateKey);
+
+  log.info('Hedera client initialized', {
     network: config.network,
     envLabel: config.envLabel,
+    agentAccountId: agent.accountId,
   });
 
-  // TODO (PR #10): const client = Client.forName(config.network).setOperator(agent.accountId, agent.privateKey);
-  // TODO (PR #10): const toolkit = new HederaMCPToolkit({ client, configuration: { /* defaults */ } });
-  // TODO (PR #10): return toolkit;
+  const toolkit = new HederaMCPToolkit({
+    client,
+    configuration: {
+      plugins: allCorePlugins,
+      context: {
+        mode: AgentMode.AUTONOMOUS,
+        accountId: agent.accountId,
+      },
+    },
+  });
 
-  throw new Error('buildToolkit: scaffold skeleton; upstream wiring lands in PR #10');
+  log.info('HederaMCPToolkit ready', {
+    mode: 'AUTONOMOUS',
+    pluginCount: allCorePlugins.length,
+  });
+
+  return toolkit;
 }
