@@ -28,7 +28,11 @@ import { buildToolkit, loadConfig, type ServerConfig } from '../server.js';
 import { log } from '../logger.js';
 
 /**
- * Loopback-bind check. Accepts the three canonical loopback values we honor.
+ * Loopback-bind check. Accepts the three canonical loopback values we honor
+ * (`127.0.0.1`, `::1`, `localhost`) — intentionally NOT the whole 127/8 block
+ * or bracketed/full-form IPv6 (`127.0.0.2`, `[::1]`, `0:0:0:0:0:0:0:1` all
+ * reject). Simplicity over exhaustiveness; add new values only with a
+ * corresponding test case in `test/integration/http-transport.test.ts`.
  * Exported so integration tests can assert the invariant directly.
  */
 export function isLoopback(bind: string): boolean {
@@ -47,11 +51,33 @@ export interface HttpServerHandle {
 }
 
 /**
+ * Test-scope overrides for `startHttpServer`. In normal dev/CLI usage, these
+ * are never set — defaults derived from `config` are correct. Tests use these
+ * to punch through guards that assume a pre-known port (e.g. `allowedHosts`
+ * allowlist) when running on an OS-assigned port.
+ */
+export interface StartHttpServerOptions {
+  /**
+   * Override the transport's `allowedHosts` allowlist.
+   *   - `undefined` (default): compute from `config.httpBind` + `config.httpPort`
+   *     — the production/dev path with Host-header validation.
+   *   - `null`: disable host validation entirely (skip the option). Use only
+   *     in tests that need MCP routing to reach the transport without a
+   *     Host-header match failure intercepting first.
+   *   - `string[]`: use the provided list verbatim (advanced test scenarios).
+   */
+  allowedHosts?: string[] | null;
+}
+
+/**
  * Build the toolkit + transport, bind an HTTP server on the configured
  * loopback address, and return a handle. Throws synchronously-rejected
  * promise if the bind address is non-loopback.
  */
-export async function startHttpServer(config: ServerConfig): Promise<HttpServerHandle> {
+export async function startHttpServer(
+  config: ServerConfig,
+  options?: StartHttpServerOptions,
+): Promise<HttpServerHandle> {
   if (!isLoopback(config.httpBind)) {
     throw new Error(
       `HEDERA_HTTP_BIND=${config.httpBind} is not a loopback address. ` +
@@ -60,19 +86,28 @@ export async function startHttpServer(config: ServerConfig): Promise<HttpServerH
   }
 
   const toolkit = buildToolkit(config);
+
+  // Resolve `allowedHosts` per the override rules in `StartHttpServerOptions`.
+  // The default allowlist uses `config.httpPort` at construction time, which
+  // means tests that let the OS assign a port (HEDERA_HTTP_PORT=0) get an
+  // allowlist of `:0` entries that never match the real bound port's Host
+  // header — so routing-oriented tests must pass `{ allowedHosts: null }`.
+  const resolvedAllowedHosts: string[] | undefined =
+    options?.allowedHosts === null
+      ? undefined
+      : options?.allowedHosts ?? [
+          `${config.httpBind}:${config.httpPort}`,
+          `127.0.0.1:${config.httpPort}`,
+          `localhost:${config.httpPort}`,
+        ];
+
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     // `allowedHosts` is marked @deprecated upstream in favor of external
     // middleware, but the built-in allowlist is a useful defense-in-depth
-    // line behind the (primary) loopback bind. When `config.httpPort=0` is
-    // used for tests, the `:0` entries will never match a real Host header —
-    // tests that drive real traffic through the transport disable host
-    // validation explicitly via their own transport instance.
-    allowedHosts: [
-      `${config.httpBind}:${config.httpPort}`,
-      `127.0.0.1:${config.httpPort}`,
-      `localhost:${config.httpPort}`,
-    ],
+    // line behind the (primary) loopback bind. Omitted entirely when the
+    // caller explicitly opts out via `options.allowedHosts = null`.
+    ...(resolvedAllowedHosts !== undefined ? { allowedHosts: resolvedAllowedHosts } : {}),
   });
 
   // Cast is needed because `StreamableHTTPServerTransport` exposes `onclose`

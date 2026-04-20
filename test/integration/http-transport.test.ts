@@ -102,7 +102,7 @@ describe('http transport / startHttpServer', () => {
     expect(handle.server.listening).toBe(true);
   });
 
-  it('responds to a TCP connection on the bound port', async () => {
+  it('responds to a TCP connection on the bound port (proves port is served, not MCP routing)', async () => {
     const agent = generateAgentEnv();
     process.env['HEDERA_AGENT_ID'] = agent.id;
     process.env['HEDERA_AGENT_KEY'] = agent.key;
@@ -112,17 +112,49 @@ describe('http transport / startHttpServer', () => {
     const config = loadConfig();
     handle = await startHttpServer(config);
 
-    // A bare GET with no MCP session header will be rejected by the
-    // transport, but that rejection still comes back as a valid HTTP
-    // response — proving the server is listening + routing requests.
+    // Deliberately scoped claim: this test proves the TCP socket is bound +
+    // the Node `http.createServer` handler fires. It does NOT prove MCP
+    // protocol routing works, because the default `allowedHosts` allowlist
+    // is computed with `config.httpPort=0` (test-only), which never matches
+    // a real Host header like `127.0.0.1:54321`. So the 4xx/5xx we see here
+    // is most likely the transport's host-rejection path — still a valid
+    // HTTP response, which is all this test asserts. MCP routing is covered
+    // by the next test using the `{ allowedHosts: null }` override.
     const res = await fetch(`http://127.0.0.1:${handle.boundPort}/mcp`, {
       method: 'GET',
     });
-    // Any valid HTTP status is fine; we're verifying the port is served.
-    // In practice the transport returns 4xx (bad/missing session), which is
-    // exactly what we want — not a connection refused.
     expect(res.status).toBeGreaterThanOrEqual(100);
     expect(res.status).toBeLessThan(600);
+  });
+
+  it('with allowedHosts disabled, bare GET is rejected by the MCP routing layer (not the host allowlist)', async () => {
+    const agent = generateAgentEnv();
+    process.env['HEDERA_AGENT_ID'] = agent.id;
+    process.env['HEDERA_AGENT_KEY'] = agent.key;
+    process.env['HEDERA_HTTP_BIND'] = '127.0.0.1';
+    process.env['HEDERA_HTTP_PORT'] = '0';
+
+    const config = loadConfig();
+    handle = await startHttpServer(config, { allowedHosts: null });
+
+    // With allowedHosts disabled, the Host header can't reject the request.
+    // A bare GET still fails (no MCP session), but the failure now proves
+    // the transport's MCP routing actually processed the request and chose
+    // to reject it for protocol reasons — not an upstream Host filter.
+    const res = await fetch(`http://127.0.0.1:${handle.boundPort}/mcp`, {
+      method: 'GET',
+    });
+
+    // The transport returns a structured JSON-RPC error for missing session;
+    // whatever status it picks, it should be a client error (4xx) indicating
+    // the request reached the MCP layer.
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+
+    // Body should be JSON (the transport's error response format), not
+    // an upstream "Forbidden" or empty 403 from host-header rejection.
+    const ct = res.headers.get('content-type') ?? '';
+    expect(ct).toContain('application/json');
   });
 
   it('close() shuts down cleanly and frees the port', async () => {
