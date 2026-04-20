@@ -381,5 +381,37 @@ describe('bootstrap-treasury / runBootstrap', () => {
       // message is the caller's signal to check state.
       expect(deps.createTreasury).toHaveBeenCalledOnce();
     });
+
+    it('logs a recovery pointer to RUNBOOKS.md on grantAllowance failure (O1 partial-failure path)', async () => {
+      const deps = buildDeps({
+        grantAllowance: vi.fn(async () => {
+          throw new Error('INVALID_SIGNATURE');
+        }),
+      });
+      await expect(
+        runBootstrap(
+          {
+            env: buildEnv(),
+            agentId: '0.0.1002',
+            initialBalanceHbar: 30000,
+            initialAllowanceHbar: 10000,
+          },
+          deps,
+        ),
+      ).rejects.toThrow();
+
+      // The recovery log line is the whole point of this test: on partial
+      // failure the caller needs to see (a) what state is on-chain, (b) why
+      // re-running won't fix it, (c) where to find the manual-repair runbook.
+      const stderrJoined = (deps.logStderr as ReturnType<typeof vi.fn>).mock.calls
+        .map((c) => c[0] as string)
+        .join('\n');
+      expect(stderrJoined).toContain('ERROR: allowance grant failed AFTER treasury 0.0.2002');
+      expect(stderrJoined).toContain('NO allowance granted');
+      expect(stderrJoined).toContain('Re-running this script will NOT retry');
+      expect(stderrJoined).toContain('docs/RUNBOOKS.md');
+      expect(stderrJoined).toContain('Allowance repair');
+      expect(stderrJoined).toContain('INVALID_SIGNATURE'); // original error preserved
+    });
   });
 });

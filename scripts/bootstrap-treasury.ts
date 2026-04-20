@@ -175,10 +175,17 @@ export async function runBootstrap(
     );
     deps.printStdout(`HEDERA_XENI_TREASURY_ID=${input.existingTreasuryId}  # existing, unchanged`);
     deps.printStdout(
-      `# Allowance state NOT checked by this script. Use the MCP tool ` +
-        `'get_treasury_allowance_remaining' or HashScan to verify. See ` +
-        `docs/RUNBOOKS.md for the top-up procedure.`,
+      `# Allowance state NOT checked by this script. To verify remaining allowance:`,
     );
+    deps.printStdout(`#   MCP: call tool 'get_treasury_allowance_remaining' (no args) against the`);
+    deps.printStdout(
+      `#        running MCP server for this env — returns { remainingHbar: number }`,
+    );
+    deps.printStdout(
+      `#   HashScan: https://hashscan.io/${input.env.network}/account/${input.existingTreasuryId}`,
+    );
+    deps.printStdout(`#            → Allowances tab → filter spender=<agent>`);
+    deps.printStdout(`# For top-up procedure, see docs/RUNBOOKS.md § "Treasury replenishment".`);
     return {
       treasuryId: input.existingTreasuryId,
       created: false,
@@ -213,13 +220,29 @@ export async function runBootstrap(
   });
   deps.logStderr(`[bootstrap-treasury] created treasury ${treasuryId} (memo="${memo}")`);
 
-  await deps.grantAllowance({
-    env: input.env,
-    treasuryId,
-    treasuryKey,
-    agentId: input.agentId,
-    allowanceHbar: input.initialAllowanceHbar,
-  });
+  // Partial-failure path: if allowance grant fails AFTER account creation,
+  // treasury exists on-chain but has no allowance. Re-running the script
+  // won't retry (env-var idempotency check would short-circuit on the
+  // treasury ID). Surface the recovery path in the error log so ops has a
+  // concrete next step — see docs/RUNBOOKS.md § "Allowance repair".
+  try {
+    await deps.grantAllowance({
+      env: input.env,
+      treasuryId,
+      treasuryKey,
+      agentId: input.agentId,
+      allowanceHbar: input.initialAllowanceHbar,
+    });
+  } catch (err) {
+    deps.logStderr(
+      `[bootstrap-treasury] ERROR: allowance grant failed AFTER treasury ${treasuryId} was created. ` +
+        `Treasury exists on-chain (balance ${input.initialBalanceHbar} HBAR) but has NO allowance ` +
+        `granted to the agent. Re-running this script will NOT retry — the env-var idempotency check ` +
+        `would find the treasury and skip creation. Recovery: see docs/RUNBOOKS.md § "Allowance repair ` +
+        `(post-M4 partial failure)". Original error: ${String(err)}`,
+    );
+    throw err;
+  }
   deps.logStderr(
     `[bootstrap-treasury] granted initial allowance: ${input.initialAllowanceHbar} HBAR, ` +
       `owner=${treasuryId}, spender=${input.agentId}`,
@@ -232,6 +255,11 @@ export async function runBootstrap(
   deps.printStdout(`# it will be printed. Never commit this line. Never put it in the`);
   deps.printStdout(`# server's runtime env — the MCP warns if it sees HEDERA_XENI_TREASURY_KEY`);
   deps.printStdout(`# at runtime (cold-key invariant, docs/DESIGN.md §3).`);
+  deps.printStdout(`#`);
+  deps.printStdout(`# FOOTGUN: if you ran this with '> out.env' the key is now on local disk`);
+  deps.printStdout(`# (and possibly synced to iCloud / Dropbox / Time Machine backup). Move`);
+  deps.printStdout(`# the key to offline storage, then 'shred -u <file>' (Linux) or`);
+  deps.printStdout(`# 'srm <file>' (macOS) to remove the local copy securely.`);
   deps.printStdout(`# ======================================================================`);
   deps.printStdout(`HEDERA_XENI_TREASURY_KEY=${treasuryKey.toStringRaw()}`);
   deps.printStdout(
