@@ -70,7 +70,7 @@ export function makeGetTreasuryAllowanceRemainingTool(
     method: GET_TREASURY_ALLOWANCE_REMAINING_TOOL,
     name: 'Get Treasury Allowance Remaining',
     description:
-      'Returns the remaining HBAR allowance that the Xeni treasury has granted the agent account — i.e. how much HBAR the agent can still pull for refunds before the daily allowance is exhausted. Pure read (no on-chain tx). Input: none. Output: { remainingHbar: number, ownerAccountId: string, spenderAccountId: string }. Precision: HBAR as a JavaScript number is safe up to ~9e16 tinybar (2^53 boundary), which covers any realistic treasury allowance. Fails loud on Mirror Node errors so callers can fail closed.',
+      'Returns the remaining HBAR allowance that the Xeni treasury has granted the agent account — i.e. how much HBAR the agent can still pull for refunds before the daily allowance is exhausted. Pure read (no on-chain tx). Input: none. Output: { remainingHbar: number, ownerAccountId: string, spenderAccountId: string }. Precision: HBAR as a JavaScript number is exact up to ~9e15 tinybar (Number.MAX_SAFE_INTEGER = 2^53 - 1), which covers any realistic treasury allowance. Fails loud on Mirror Node errors so callers can fail closed.',
     parameters: inputSchema,
     execute: async (
       _client: Client,

@@ -99,10 +99,12 @@ describe('mirrorNode / sumRemainingTinybar', () => {
     expect(sumRemainingTinybar(res)).toBe(9_000_000_000_000_000n);
   });
 
-  it('truncates fractional amounts defensively (shouldnt happen; Mirror Node returns integers)', () => {
+  it('throws (fails loud) on fractional tinybar amounts — tinybar is integer on-chain', () => {
+    // Hypothetical bad upstream: 123.7 is not a valid tinybar. We want to
+    // know about shape surprises, not silently truncate and under-count.
+    // Matches the rest of mirrorNode.ts's fail-loud stance.
     const res: MirrorCryptoAllowanceResponse = {
       allowances: [
-        // Hypothetical bad upstream: 123.7 should truncate to 123
         {
           amount: 123.7,
           amount_granted: 1000,
@@ -113,7 +115,7 @@ describe('mirrorNode / sumRemainingTinybar', () => {
       ],
       links: { next: null },
     };
-    expect(sumRemainingTinybar(res)).toBe(123n);
+    expect(() => sumRemainingTinybar(res)).toThrow(/non-integer tinybar amount/);
   });
 });
 

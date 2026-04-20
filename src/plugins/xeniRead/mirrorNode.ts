@@ -154,14 +154,24 @@ export async function fetchCryptoAllowances(
  * sum defensively so multiple entries don't silently under-count.
  * Returns 0 when the allowances array is empty (no grants exist yet —
  * e.g. before M4 bootstrap-treasury has run for a fresh env).
+ *
+ * Throws with a clear message if `amount` is not an integer — tinybar is
+ * integer on-chain, so a fractional value indicates a Mirror Node
+ * response-shape surprise we want to know about (rather than silently
+ * truncate and under-count). Matches the rest of this module's fail-loud
+ * stance on shape surprises.
  */
 export function sumRemainingTinybar(response: MirrorCryptoAllowanceResponse): bigint {
   let total = 0n;
   for (const a of response.allowances) {
-    // `amount` is JSON number; coerce to bigint via string to avoid any
-    // float rounding for large tinybar values (treasury allowances in
-    // production could plausibly be 10^10+ tinybar = 100+ HBAR).
-    total += BigInt(Math.trunc(a.amount));
+    if (!Number.isInteger(a.amount)) {
+      throw new Error(
+        `Mirror Node returned non-integer tinybar amount: ${a.amount} ` +
+          `(owner=${a.owner} spender=${a.spender}). Tinybar is integer on-chain; ` +
+          `a fractional value indicates an upstream shape change worth investigating.`,
+      );
+    }
+    total += BigInt(a.amount);
   }
   return total;
 }
