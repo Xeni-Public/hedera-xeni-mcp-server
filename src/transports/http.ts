@@ -17,7 +17,7 @@ function isLoopback(bind: string): boolean {
   return bind === '127.0.0.1' || bind === '::1' || bind === 'localhost';
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await for transport.start() lands in PR #11 when StreamableHTTPServerTransport wiring replaces the throw below.
+// eslint-disable-next-line @typescript-eslint/require-await -- skeleton; await for transport.start() lands in PR #12 when StreamableHTTPServerTransport wiring replaces the throw below.
 async function main(): Promise<void> {
   const config = loadConfig();
 
@@ -36,14 +36,14 @@ async function main(): Promise<void> {
   });
 
   // Exercise buildToolkit so its env-parsing + fail-open/closed checks run.
-  // Toolkit instance intentionally not retained — PR #11 connects it to
+  // Toolkit instance intentionally not retained — PR #12 connects it to
   // StreamableHTTPServerTransport.
   buildToolkit(config);
 
-  // TODO (PR #11): connect the toolkit to StreamableHTTPServerTransport
-  // TODO (PR #11): start HTTP server bound to config.httpBind:config.httpPort
-  // TODO (PR #11): handle SIGTERM / SIGINT for clean shutdown
-  throw new Error('http transport: scaffold skeleton; implementation lands in PR #11');
+  // TODO (PR #12): connect the toolkit to StreamableHTTPServerTransport
+  // TODO (PR #12): start HTTP server bound to config.httpBind:config.httpPort
+  // TODO (PR #12): handle SIGTERM / SIGINT for clean shutdown
+  throw new Error('http transport: scaffold skeleton; implementation lands in PR #12');
 }
 
 main().catch((err: unknown) => {
