@@ -91,6 +91,20 @@ Total topic-create cost: ~$0.04 for all four envs (one-time). Negligible.
 
 **Rationale (vs per-intent topics):** HCS topics are public anyway — per-intent isolation buys zero privacy. Topic creation at ~$0.01 × N intents is real money at scale. Single ordered timeline per env is stronger audit than fragmented streams. Future split (per-customer in Phase 5, per-event-class if volume demands) is config-only.
 
+### Topic key design (created by M3 `bootstrap-audit-topic.ts`)
+
+Each `xeni_audit` topic is created with explicit admin + submit keys. The choice keeps runtime signing aligned with the cold-key invariant and leaves key-rotation paths intact.
+
+| Key field    | Value                    | Why                                                                                                                                                                                                                                                                                                                             |
+| ------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `memo`       | `xeni_audit_v1_<env>`    | Doubles as the idempotency key — re-running M3 against an already-bootstrapped env finds the existing topic via Mirror Node memo match and re-uses it. `_v1_` segment reserves room for a future `_v2_` schema alongside the old topic. Env label NOT normalized (case-preserving) so `testnet-UAT` ≠ `testnet-uat`.            |
+| `admin_key`  | `operator.publicKey`     | Lets the operator later rotate `submit_key` (e.g. agent key rotation) or update metadata without recreating the topic + losing the audit timeline. Operator is cold, loaded only by ops at bootstrap + rotation time.                                                                                                           |
+| `submit_key` | `agent.publicKey`        | Only the agent can post to the topic at runtime. Prevents unauthorized actors from polluting our audit stream. The agent public key is fetched from Mirror Node at bootstrap time — the script never holds the agent private key. (If `submit_key` were the operator's key instead, runtime submits would fail — operator is cold.) |
+
+**Agent key rotation path:** operator signs a `TopicUpdateTransaction` with the new agent's public key as the new `submit_key`. No new topic; audit timeline continues uninterrupted. Documented in `RUNBOOKS.md` (TODO — rotation runbook lands alongside first rotation).
+
+**Why not no submit_key (public-write topic):** would let any on-chain actor post to our audit stream. Readers (AgentService ingestion, Frontend HashScan verification) would need to filter by payer, which is brittle — an attacker can still pollute the stream even if our consumers filter, and the topic history is permanent. The ~$0.04 one-time cost of setting submit_key is trivial compared to the forever-polluted-audit-stream risk.
+
 ### HCS audit event schema (v1)
 
 ```json

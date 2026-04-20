@@ -287,7 +287,7 @@ If TS reference and Go production diverge, the divergence is a bug in whichever 
 
 ## Timing + sequencing
 
-1. **Hedera side (H-MCP-Buddy):** PR #8 (this doc + design-doc updates, no code moves) → PR #9 (move files to `reference-impl/`) → PR #11 (thin server + stdio; GH numbering skipped #10 to Issue #10) → PR #12 (http) → PR #13 (M3 impl) → PR #14 (M4 impl) → PR #15 (E2E testnet-ci) → signal "MCP ready on testnet".
+1. **Hedera side (H-MCP-Buddy):** PR #8 (this doc + design-doc updates, no code moves) → PR #9 (move files to `reference-impl/`) → PR #11 (thin server + stdio; GH numbering skipped #10 to Issue #10) → PR #12 (http) → PR #13 (xeniReadPlugin + `get_treasury_allowance_remaining`) → PR #15 (M3 bootstrap-audit-topic; GH numbering skipped #14 to Issue #14) → PR #16 (M4 bootstrap-treasury) → PR #17 (E2E testnet-ci) → signal "MCP ready on testnet".
 2. **AgentService side (you):** port the 6 concerns above to Go once `reference-impl/` lands. Your port can proceed in parallel with later Hedera PRs — you don't need to wait for the MCP signal to start the Go ports.
 3. **Coordinated cutover:** as before — 3-way merge (Hedera MCP + AgentService + Frontend).
 
