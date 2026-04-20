@@ -39,12 +39,19 @@ Mode switch (`AgentMode.AUTONOMOUS` vs `AgentMode.RETURN_BYTES`) is context-driv
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- |
 | `operator`             | Xeni platform admin. **Key kept cold** post-pivot — used only for bootstrap scripts (M3 topic create, M4 treasury create) and ops emergencies. **NOT loaded in the running server's env.** Since upstream's `HederaMCPToolkit` takes one client (agent), operator never signs at runtime.                                                                                                                                                                                                                                      | —                            |
 | `agent`                | Sole runtime signing identity in the MCP server. Signs every tool-driven transaction: approve allowance bytes (user-signed in RETURN_BYTES mode, not signed by agent), transfers via allowance, and HCS audit submits (agent pays the HCS fee now that operator is cold). ECDSA key in server env.                                                                                                                                                                                                                             | —                            |
-| `xeni_treasury`        | Xeni-as-MoR receiving + refunding account. **Dedicated account, distinct from operator. Key kept cold** — used only for initial + replenishment refund-allowance approvals; never in server process env. Bootstrap via `scripts/bootstrap-treasury.ts` per env. <br><br>`TODO(p1):` document cold-key operational definition concretely: ops-laptop-signed (offline) / HSM / hardware wallet. POC is probably "ops-laptop-signed, never loaded into server env." Fill during implementation PR once ops procedure is ratified. | —                            |
+| `xeni_treasury`        | Xeni-as-MoR receiving + refunding account. **Dedicated account, distinct from operator. Private KEY kept cold** — used only for initial + replenishment refund-allowance approvals; never in server process env. The ACCOUNT ID (`HEDERA_XENI_TREASURY_ID`) IS loaded at runtime — it's a public identifier, used by read-only Mirror Node queries (e.g. `get_treasury_allowance_remaining` — see §6 post-pivot section). Bootstrap via `scripts/bootstrap-treasury.ts` per env. <br><br>`TODO(p1):` document cold-key operational definition concretely: ops-laptop-signed (offline) / HSM / hardware wallet. POC is probably "ops-laptop-signed, never loaded into server env." Fill during implementation PR once ops procedure is ratified. | —                            |
 | `xeni_platform_fee`    | Off-chain bookkeeping                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Optional on-chain split      |
 | `customer_accounts[*]` | Deferred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Phase 5: Customer-MoR        |
 | `supplier_accounts[*]` | Deferred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Phase 4: on-chain settlement |
 
 **Per-env account isolation:** `operator`, `agent`, `xeni_treasury` each get distinct testnet accounts per environment (`dev`, `testnet-ci`, `testnet-uat`) + dedicated mainnet accounts for prod. No shared accounts across envs.
+
+**ID vs KEY distinction (cold-key invariant, precise definition):** the "cold key" rule protects **private keys**, not public account IDs. Account IDs like `0.0.12345` are already on-chain data and appear in HashScan, Mirror Node responses, and every transaction receipt — treating them as secret is theater. Concretely:
+
+- **Private KEYs** (`HEDERA_OPERATOR_KEY`, `HEDERA_XENI_TREASURY_KEY`) must stay out of the running server's env. The server WARN-logs on startup if it sees them (see `src/accounts.ts::warnIfColdKeyLeaked`).
+- **Account IDs** (`HEDERA_OPERATOR_ID`, `HEDERA_XENI_TREASURY_ID`) are safe in runtime env. `HEDERA_XENI_TREASURY_ID` is loaded at runtime specifically so `get_treasury_allowance_remaining` can name the (treasury → agent) pair to Mirror Node.
+
+`HEDERA_OPERATOR_ID` is NOT loaded at runtime today, but could be in the future without breaking the invariant — the rule is about keys, not IDs.
 
 ## 4. On-chain money flow (v1, Xeni-MoR only)
 
@@ -138,7 +145,23 @@ Pre-pivot MCP-side layer — **relocated, not cancelled.** `spendPolicyGuard` an
 | `auditEnvelopeBuilder`                                     | AgentService, post-MCP-response before outbox write             |
 | `accountResolver`                                          | Not needed — single runtime client (agent)                      |
 
-**Zero tools, zero hooks, zero policies in the MCP plugin system.** The "Xeni intent-mandate plugin" concept is gone from this repo. What remains inside `src/` is the MCP scaffolding: `server.ts` (toolkit construction), `transports/` (stdio + http), `accounts.ts` (single-account validation), `logger.ts`.
+**Zero Xeni business logic in the MCP plugin system.** The "Xeni intent-mandate plugin" concept is gone from this repo. What remains inside `src/` is the MCP scaffolding: `server.ts` (toolkit construction), `transports/` (stdio + http), `accounts.ts` (single-account validation), `logger.ts`.
+
+### Narrow exception: `xeniReadPlugin` (read-only wrappers)
+
+One small Xeni-owned plugin exists, and by design it carries **no business logic** — only thin wrappers around public on-chain / Mirror Node state that AgentService would otherwise have to query directly (violating Option D's "MCP is the single gateway to Hedera" principle).
+
+| Tool                               | PR     | Purpose                                                                                                                                                                              |
+| ---------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get_treasury_allowance_remaining` | PR #13 | Returns `{ remainingHbar: number }` for the (treasury → agent) pair. Consumer: AgentService's `treasuryAllowanceGuard`. Pure read via Mirror Node REST `allowances/crypto` endpoint. |
+
+**What belongs here, what doesn't:**
+
+- ✅ Thin REST/on-chain reads with no decisions (balance queries, allowance queries, topic-message fetches, receipt lookups)
+- ❌ Any policy check, budget enforcement, rejection reason, or value-judgment. Those all stay AgentService-side.
+- ❌ Any write path. All writes already go through upstream core tools (`transfer_hbar`, `submit_topic_message`, etc.).
+
+Future read tools will naturally accrete here (e.g. `get_audit_topic_latest_sequence` for Frontend's HashScan verification, `get_agent_balance` for treasury alerting). The plugin is a container, not a precedent for business-logic creep.
 
 ## 7. Public / private boundary
 

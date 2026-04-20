@@ -28,6 +28,20 @@ function generateAgentEnv(): { id: string; key: string } {
   return { id: '0.0.1234567', key: pk.toStringRaw() };
 }
 
+/**
+ * Set the minimum required env to make `buildToolkit()` succeed in tests.
+ * PR #13 added `HEDERA_XENI_TREASURY_ID` as a runtime requirement (for the
+ * `get_treasury_allowance_remaining` tool); tests that want a successful
+ * toolkit build must set both agent + treasury env vars.
+ */
+function setValidBuildEnv(): { agent: { id: string; key: string } } {
+  const agent = generateAgentEnv();
+  process.env['HEDERA_AGENT_ID'] = agent.id;
+  process.env['HEDERA_AGENT_KEY'] = agent.key;
+  process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+  return { agent };
+}
+
 describe('server / buildToolkit', () => {
   const savedEnv = { ...process.env };
 
@@ -48,12 +62,14 @@ describe('server / buildToolkit', () => {
 
   it('throws when HEDERA_AGENT_ID is missing', () => {
     process.env['HEDERA_AGENT_KEY'] = generateAgentEnv().key;
+    process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
     const config = loadConfig();
     expect(() => buildToolkit(config)).toThrow(/HEDERA_AGENT_ID/);
   });
 
   it('throws when HEDERA_AGENT_KEY is missing', () => {
     process.env['HEDERA_AGENT_ID'] = generateAgentEnv().id;
+    process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
     const config = loadConfig();
     expect(() => buildToolkit(config)).toThrow(/HEDERA_AGENT_KEY/);
   });
@@ -61,14 +77,22 @@ describe('server / buildToolkit', () => {
   it('throws when HEDERA_AGENT_KEY is malformed', () => {
     process.env['HEDERA_AGENT_ID'] = generateAgentEnv().id;
     process.env['HEDERA_AGENT_KEY'] = 'not-a-hex-key';
+    process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
     const config = loadConfig();
     expect(() => buildToolkit(config)).toThrow();
   });
 
-  it('returns a HederaMCPToolkit instance with valid agent env', () => {
+  it('throws when HEDERA_XENI_TREASURY_ID is missing (runtime read for get_treasury_allowance_remaining)', () => {
     const agent = generateAgentEnv();
     process.env['HEDERA_AGENT_ID'] = agent.id;
     process.env['HEDERA_AGENT_KEY'] = agent.key;
+    // HEDERA_XENI_TREASURY_ID intentionally omitted
+    const config = loadConfig();
+    expect(() => buildToolkit(config)).toThrow(/HEDERA_XENI_TREASURY_ID/);
+  });
+
+  it('returns a HederaMCPToolkit instance with valid agent + treasury env', () => {
+    setValidBuildEnv();
 
     const config = loadConfig();
     const toolkit = buildToolkit(config);
@@ -77,9 +101,7 @@ describe('server / buildToolkit', () => {
   });
 
   it('defaults network to testnet when HEDERA_NETWORK is unset', () => {
-    const agent = generateAgentEnv();
-    process.env['HEDERA_AGENT_ID'] = agent.id;
-    process.env['HEDERA_AGENT_KEY'] = agent.key;
+    setValidBuildEnv();
 
     const config = loadConfig();
     expect(config.network).toBe('testnet');
@@ -89,9 +111,7 @@ describe('server / buildToolkit', () => {
   });
 
   it('accepts mainnet when HEDERA_NETWORK=mainnet', () => {
-    const agent = generateAgentEnv();
-    process.env['HEDERA_AGENT_ID'] = agent.id;
-    process.env['HEDERA_AGENT_KEY'] = agent.key;
+    setValidBuildEnv();
     process.env['HEDERA_NETWORK'] = 'mainnet';
 
     const config = loadConfig();
@@ -116,14 +136,21 @@ describe('server / buildToolkit', () => {
   });
 
   it('exposes an agent account that WARN-logs on operator-key leak (cold-key invariant)', () => {
-    const agent = generateAgentEnv();
-    process.env['HEDERA_AGENT_ID'] = agent.id;
-    process.env['HEDERA_AGENT_KEY'] = agent.key;
+    setValidBuildEnv();
     process.env['HEDERA_OPERATOR_KEY'] = 'should-not-be-in-runtime-env';
 
     const config = loadConfig();
     // Not asserting the log line here (stderr capture is vitest-project-level);
     // just confirming buildToolkit still succeeds — WARN does not block startup.
+    expect(() => buildToolkit(config)).not.toThrow();
+  });
+
+  it('allows HEDERA_XENI_TREASURY_ID at runtime (public identifier, not a cold key)', () => {
+    // Reverse check of the cold-key invariant: the ACCOUNT ID is safe in
+    // runtime env, and no WARN should fire for it. Only the KEY triggers
+    // the cold-key warning (covered in src/accounts.ts tests indirectly).
+    setValidBuildEnv();
+    const config = loadConfig();
     expect(() => buildToolkit(config)).not.toThrow();
   });
 });

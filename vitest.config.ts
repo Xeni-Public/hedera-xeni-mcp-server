@@ -34,6 +34,10 @@ export default defineConfig({
         'src/server.ts',
         // HTTP transport (tested via test/integration/http-transport.test.ts as of PR #12)
         'src/transports/http.ts',
+        // Xeni read plugin (tested via test/unit/ as of PR #13)
+        'src/plugins/xeniRead/index.ts',
+        'src/plugins/xeniRead/mirrorNode.ts',
+        'src/plugins/xeniRead/getTreasuryAllowanceRemaining.ts',
         // reference-impl specs (behavioral contracts for AgentService Go port)
         'reference-impl/hbar.ts',
         'reference-impl/hooks/auditEnvelopeBuilder.ts',
