@@ -57,6 +57,20 @@ describe('mandateBudgetGuard', () => {
       expect(result.remainingHbar).toBe(0);
     });
 
+    it('passes when mandate is fully spent and amount is zero (degenerate but valid)', () => {
+      // total=100, spent=100, amount=0 → remaining=0, no-op transfer.
+      // Addresses Lead Buddy PR #5 observation O2 — locks the degenerate
+      // edge explicitly (previously only covered implicitly via `0 > 0`).
+      const result = mandateBudgetGuard({
+        ...baseInput,
+        mandateTotalHbar: 100,
+        mandateSpentHbar: 100,
+        amountHbar: 0,
+      });
+      expect(result.passed).toBe(true);
+      expect(result.remainingHbar).toBe(0);
+    });
+
     it('passes with optional correlationId present', () => {
       expect(mandateBudgetGuard({ ...baseInput, correlationId: 'corr-abc' }).passed).toBe(true);
     });

@@ -28,8 +28,14 @@ export function toTinybar(hbar: number): bigint {
 }
 
 /**
- * Convert tinybar (BigInt) back to HBAR (float). Safe when the BigInt fits
- * within the same precision bound as toTinybar (i.e. ~90M HBAR in tinybar).
+ * Convert tinybar (BigInt) back to HBAR (float).
+ *
+ * `Number(bigint)` loses precision when the BigInt exceeds 2^53
+ * (`Number.MAX_SAFE_INTEGER`, ~9e15 tinybar = ~90M HBAR); the subsequent
+ * `/ 1e8` then yields a lossy HBAR value. v1 use cases (refund cap
+ * 10k HBAR/day; per-user mandates smaller still) sit far below this
+ * ceiling. Callers that could exceed ~90M HBAR must either keep values
+ * in tinybar or pass the BigInt through unconverted.
  */
 export function fromTinybar(tb: bigint): number {
   return Number(tb) / TINYBAR_PER_HBAR;
