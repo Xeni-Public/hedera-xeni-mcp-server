@@ -128,7 +128,7 @@ All four hooks + one policy previously planned here (`spendPolicyGuard`, `mandat
 
 ### Pre-pivot surface (historical, for reference)
 
-Previously planned MCP-side layer (now not implemented in this repo):
+Pre-pivot MCP-side layer — **relocated, not cancelled.** `spendPolicyGuard` and `mandateBudgetGuard` were actually merged in PRs #4 and #5 with full implementations + test suites; `treasuryAllowanceGuard` + `auditEnvelopeBuilder` landed in PRs #6 / the scaffold. The pivot moves the same behaviors to AgentService (Go) rather than starting from zero. TS implementations stay as executable specs under `reference-impl/` (PR #9).
 
 | Component                                                  | Where now                                                       |
 | ---------------------------------------------------------- | --------------------------------------------------------------- |
@@ -447,6 +447,16 @@ Notes:
 - Null optional fields are omitted per the null-omission rule, not sent as literal `null`.
 
 **Retired contract:** the previous `{ receipt, auditEnvelope }` envelope-bundled shape is gone. AgentService constructs envelopes locally from this receipt + its intent state; see [HANDOVER_TO_AGENT_SERVICE.md](HANDOVER_TO_AGENT_SERVICE.md) for the Go port spec.
+
+### ⚠ Upstream gap on `submit_message` — `topicSequenceNumber` not exposed
+
+The idealized shape above shows `topic_sequence_number` on the response. **In practice upstream `@hashgraph/hedera-agent-kit@4.0.0` maps `receipt.topicSequenceNumber` → nothing** in its `RawTransactionResponse`. The default `postProcess` for the topic-submit tool returns only a text message with `transactionId`.
+
+**v1 workaround (AgentService-side):** after a successful `submit_message` call, AgentService queries Hedera Mirror Node for the transaction (`GET /api/v1/transactions/{transactionId}`) to retrieve `sequence_number` + `running_hash`. One extra Mirror Node call per submit at the outbox-drain-worker layer — async path, acceptable latency. Reuses the Mirror Node client AgentService already builds for `treasuryAllowanceGuard`.
+
+**Long-term (Phase 2+):** contribute an upstream PR to add `topicSequenceNumber` + `topicRunningHash` to `RawTransactionResponse`. Small, obvious win. Tracked.
+
+Full rationale + Go implementation hint in [HANDOVER_TO_AGENT_SERVICE.md → MCP response shape](HANDOVER_TO_AGENT_SERVICE.md).
 
 ## Scaffold checklist (tracked — what this PR delivers)
 

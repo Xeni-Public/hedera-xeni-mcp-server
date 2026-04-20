@@ -141,23 +141,149 @@ The calculator is used inside the audit envelope builder to populate `split_acco
 
 ## MCP response shape (what AgentService receives)
 
-**Simpler than previously planned** — since AgentService builds the envelope itself, the MCP response only carries the Hedera receipt:
+**Simpler than previously planned** — since AgentService builds the envelope itself, the MCP response only carries the Hedera receipt. **Upstream `RawTransactionResponse` is the actual shape:**
 
-```json
-{
-  "status": "SUCCESS",
-  "txId": "0.0.agent@1745612345.123456789",
-  "consensus_timestamp": "2026-04-18T22:15:03.123456789Z",
-  "network": "testnet",
-  "topic_sequence_number": null,
-  "topic_running_hash": null
+```ts
+// From node_modules/@hashgraph/hedera-agent-kit: src/shared/strategies/tx-mode-strategy.ts
+interface RawTransactionResponse {
+  status: string; // "SUCCESS" on the happy path
+  accountId: AccountId | null;
+  tokenId: TokenId | null;
+  transactionId: string; // e.g. "0.0.agent@1745612345.123456789"
+  topicId: TopicId | null; // populated only for topic ops (create_topic, submit_message)
+  scheduleId: ScheduleId | null;
 }
 ```
 
-- `topic_sequence_number` / `topic_running_hash` populated only on `submit_message` responses; omitted on transfer responses.
-- AgentService takes this receipt, combines with intent state, calls its ported `auditEnvelopeBuilder` to produce the full envelope, writes to outbox.
+Upstream wraps this in `{ raw: RawTransactionResponse, humanMessage: string }` under `AgentMode.AUTONOMOUS`. The MCP handler stringifies and returns via the MCP content-block transport: `{ content: [{ type: "text", text: "<JSON>" }] }`. AgentService's client strips the content-block wrapping and JSON-parses the `text` back into `{ raw, humanMessage }`.
+
+### ⚠ Gap: `topicSequenceNumber` is NOT in the upstream response
+
+**Important for `submit_message` specifically.** Our design doc §5 lists `hcs_sequence` as an outbox row field populated on successful submit — used by Frontend for HashScan deep-links (`/topic/{id}?sequence={n}`). We assumed `submit_message` would return the sequence.
+
+**Upstream doesn't expose it.** `RawTransactionResponse` maps `receipt.topicSequenceNumber` → nothing. The default `postProcess` returns only: `"Message submitted successfully with transaction id <id>"`. No sequence, no running hash.
+
+**Workaround for v1 (AgentService-side):** after a successful `submit_message` MCP call, AgentService queries Hedera Mirror Node for the transaction by `transactionId`:
+
+```
+GET /api/v1/transactions/{transactionId}
+```
+
+The Mirror Node response includes `consensus_timestamp` + topic-specific fields (`sequence_number`, `running_hash`) under the matched topic operation. One extra Mirror Node call per submit — ~50-200ms latency, acceptable at the outbox-drain-worker layer where async is expected.
+
+**Implementation hint for AgentService:** the outbox worker's drain loop becomes:
+
+```
+1. SELECT pending outbox row
+2. Call MCP.submit_message(topic_id, payload_json) → get transactionId
+3. Query Mirror Node /transactions/{transactionId} → get sequence_number
+4. UPDATE outbox row SET status=done, hcs_tx_id=..., hcs_sequence=...
+```
+
+The Mirror Node client you're already building for `treasuryAllowanceGuard` (query remaining allowance) gets reused here.
+
+**Long-term fix (Phase 2+):** contribute an upstream PR to add `topicSequenceNumber` + `topicRunningHash` to `RawTransactionResponse`. Small, obvious win for any HCS consumer. Tracked as a Phase 2 item — not blocking v1.
+
+### Canonical MCP response shape (what AgentService code should expect)
+
+After the MCP SDK content-block unwrap + JSON parse:
+
+```json
+{
+  "raw": {
+    "status": "SUCCESS",
+    "accountId": null,
+    "tokenId": null,
+    "transactionId": "0.0.agent@1745612345.123456789",
+    "topicId": "0.0.xxxxxxx",
+    "scheduleId": null
+  },
+  "humanMessage": "Message submitted successfully with transaction id 0.0.agent@1745612345.123456789"
+}
+```
+
+- Only `raw` is the programmatic contract. `humanMessage` is for logging / debugging — don't parse it.
+- `topicId` populated on topic ops (create_topic, submit_message); `null` on transfers.
+- `accountId`, `tokenId`, `scheduleId` populated on their respective tool calls; `null` otherwise.
+- Hedera's `consensus_timestamp` is NOT on `raw` — comes from the Mirror Node lookup if you need it for `tx_timestamp` (alternative: use `new Date()` at envelope-build time as an approximation; drift is < 5s on a healthy network).
 
 **Previous `{ receipt, auditEnvelope }` contract is retired.** MCP doesn't build envelopes anymore. Any code in AgentService that parses `auditEnvelope` from an MCP response should be changed to call `BuildAuditEnvelope` locally instead.
+
+## Guard → envelope field mapping (per PR #8 review C1)
+
+For every audit envelope field, here's the source (where AgentService computes the value):
+
+| Envelope field                                                            | Source                                                                                              | When computed                         |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `event_id`                                                                | Go `uuid.NewString()` inside `auditEnvelopeBuilder`                                                 | At envelope build (post-MCP-response) |
+| `schema_version`                                                          | Constant `1` in Go                                                                                  | At envelope build                     |
+| `tx_timestamp`                                                            | `raw.transactionId`-derived timestamp; or Mirror Node lookup if millisecond precision matters       | From receipt                          |
+| `txId`                                                                    | `raw.transactionId` from MCP response                                                               | From receipt                          |
+| `event`                                                                   | AgentService state-machine decision (`payment_executed`, `refund_executed`, `allowance_granted`, …) | At envelope build                     |
+| `intent_id`, `customer_id`, `booking_ref`, `user`, `total`, `destination` | Intent row + tool-call input                                                                        | At envelope build                     |
+| `split_accounting.supplier_cost` / `platform_fee` / `customer_commission` | `fees.Calculator.Calculate(ctx)` Go port                                                            | At envelope build                     |
+| `remaining_user_allowance` (payment events only)                          | `mandateBudgetGuard.remainingHbar - payment.amountHbar`                                             | At envelope build, using guard output |
+| `treasury_allowance_remaining_after` (refund events only)                 | `treasuryAllowanceGuard.remaining - refund.amountHbar`                                              | At envelope build, using guard output |
+
+**Null-omission rule:** optional fields (`remaining_user_allowance`, `treasury_allowance_remaining_after`) are **omitted** from the JSON entirely when not applicable — not emitted as `null`. Smaller payload, cleaner parsing.
+
+**Not envelope fields, stored separately on the outbox row (populated by the drain worker post-submit):**
+
+| Outbox row column | Source                                                       | When populated                                                        |
+| ----------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `hcs_tx_id`       | MCP's `submit_message` response `raw.transactionId`          | After successful submit                                               |
+| `hcs_sequence`    | Mirror Node query `GET /api/v1/transactions/{transactionId}` | After successful submit (Mirror Node lookup — see the gap note above) |
+
+Frontend deep-links construct as `/topic/{env audit topic id}?sequence={outbox.hcs_sequence}`. `hcs_sequence` is not inside the envelope JSON that HCS stores — it's a consequence of the submit, stored next to the envelope in the outbox for lookup convenience.
+
+## Error contract (per PR #8 review C2)
+
+AgentService's existing structured-error convention (`errors[0].type`, established in PR #17 with `booking.*` / `mandate.*` prefixes) extends naturally to guard rejects. Stable type strings the Frontend can switch on:
+
+| Guard reject                                                                                       | HTTP status | `errors[0].type`               |
+| -------------------------------------------------------------------------------------------------- | ----------- | ------------------------------ |
+| `spendPolicyGuard`: amount > user's configured ceiling                                             | 409         | `policy.spend_ceiling`         |
+| `mandateBudgetGuard`: amount > remaining intent budget                                             | 409         | `mandate.budget_exceeded`      |
+| `mandateBudgetGuard`: mandate in invalid state (spent > total, or expired / cancelled / completed) | 500         | `mandate.invalid_state`        |
+| `treasuryAllowanceGuard`: refund > current allowance                                               | 409         | `treasury.allowance_exhausted` |
+| Any guard: non-finite amount, negative, malformed input                                            | 400         | `guard.invalid_input`          |
+
+These live as exported constants in `constants/errors.go` (AgentService side) so the mapping is locked at compile time:
+
+```go
+const (
+    ErrTypePolicySpendCeiling        = "policy.spend_ceiling"
+    ErrTypeMandateBudgetExceeded     = "mandate.budget_exceeded"
+    ErrTypeMandateInvalidState       = "mandate.invalid_state"
+    ErrTypeTreasuryAllowanceExhausted = "treasury.allowance_exhausted"
+    ErrTypeGuardInvalidInput          = "guard.invalid_input"
+)
+```
+
+Frontend Buddy: these are the stable UI-contract handles for the new error cases the pivot introduces. Switch on `errors[0].type` in your render layer.
+
+## Slack webhook — unset behavior (per PR #8 review M1)
+
+If `audit.deadletter_slack_webhook` (or equivalent env for `treasuryAllowanceGuard`) is empty or unset:
+
+- `slackSender.Post(payload)` is a **no-op**
+- Emits a single `[slack] webhook not configured; skipping alert` **info log**
+- Does NOT return an error to the caller
+- Does NOT retry
+
+This matches the fire-and-forget contract of the rest of the Slack path: missing webhook ≠ failure path.
+
+## HANDOVER as source of truth (per PR #8 review C4)
+
+**Process:** any change to guard behavior, envelope shape, error types, Mirror Node call shape, or any other cross-repo contract MUST ship as a HANDOVER edit FIRST (via coordination log entry), THEN land in both TS `reference-impl/` and Go production code.
+
+- HANDOVER doc = authoritative specification.
+- TS `reference-impl/` + vitest suite = executable specs tracking HANDOVER; test names should be language-neutral ("rejects NaN amount", not "rejects when Number.isFinite returns false") so they port cleanly to Go.
+- Go production code in AgentService = the live implementation, validated against the HANDOVER contract.
+
+If TS reference and Go production diverge, the divergence is a bug in whichever lags HANDOVER. Resolution: edit HANDOVER to describe correct behavior, update both TS + Go to match.
+
+**Behavioral contract tests as JSON fixtures (Phase 2+ idea):** a future enhancement worth noting — a shared `contracts/*.json` directory with input→output fixture pairs, loaded by both TS vitest and Go test suites. Auto-catches cross-language drift. Not blocking v1.
 
 ## Timing + sequencing
 
