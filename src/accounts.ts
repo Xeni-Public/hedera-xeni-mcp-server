@@ -62,3 +62,16 @@ export function loadAgentAccount(): AgentAccount {
     privateKey: requireEnv('HEDERA_AGENT_KEY'),
   };
 }
+
+/**
+ * Load the Xeni treasury ACCOUNT ID from env. The account ID is a public
+ * identifier and is safe in runtime env — only the private KEY triggers
+ * the cold-key invariant. Used by read-only MCP tools like
+ * `get_treasury_allowance_remaining` that query Mirror Node for the
+ * (treasury → agent) allowance without ever signing on the treasury's behalf.
+ *
+ * See docs/DESIGN.md §3 for the ID-vs-KEY distinction.
+ */
+export function loadTreasuryAccountId(): string {
+  return requireEnv('HEDERA_XENI_TREASURY_ID');
+}

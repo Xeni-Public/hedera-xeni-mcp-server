@@ -15,7 +15,8 @@ import { AgentMode } from '@hashgraph/hedera-agent-kit';
 import { allCorePlugins } from '@hashgraph/hedera-agent-kit/plugins';
 import { HederaMCPToolkit } from '@hashgraph/hedera-agent-kit-mcp';
 import { Client, PrivateKey } from '@hiero-ledger/sdk';
-import { loadAgentAccount } from './accounts.js';
+import { loadAgentAccount, loadTreasuryAccountId } from './accounts.js';
+import { xeniReadPlugin } from './plugins/xeniRead/index.js';
 import { log } from './logger.js';
 
 export interface ServerConfig {
@@ -64,6 +65,7 @@ export function loadConfig(): ServerConfig {
  */
 export function buildToolkit(config: ServerConfig): HederaMCPToolkit {
   const agent = loadAgentAccount();
+  const treasuryAccountId = loadTreasuryAccountId();
 
   // Parse + validate the key at boot — fail loud if malformed.
   const agentPrivateKey = PrivateKey.fromStringECDSA(agent.privateKey);
@@ -74,12 +76,29 @@ export function buildToolkit(config: ServerConfig): HederaMCPToolkit {
     network: config.network,
     envLabel: config.envLabel,
     agentAccountId: agent.accountId,
+    treasuryAccountId,
   });
+
+  // Compose upstream core plugins with the Xeni-owned read plugin.
+  // `xeniReadPlugin` carries NO Xeni business logic — just thin read-only
+  // wrappers (currently `get_treasury_allowance_remaining`) that give
+  // AgentService a single integration surface instead of talking to
+  // Mirror Node directly. See docs/DESIGN.md §6 for the policy.
+  const plugins = [
+    ...allCorePlugins,
+    xeniReadPlugin({
+      getTreasuryAllowanceRemaining: {
+        treasuryAccountId,
+        agentAccountId: agent.accountId,
+        network: config.network,
+      },
+    }),
+  ];
 
   const toolkit = new HederaMCPToolkit({
     client,
     configuration: {
-      plugins: allCorePlugins,
+      plugins,
       context: {
         mode: AgentMode.AUTONOMOUS,
         accountId: agent.accountId,
@@ -89,7 +108,9 @@ export function buildToolkit(config: ServerConfig): HederaMCPToolkit {
 
   log.info('HederaMCPToolkit ready', {
     mode: 'AUTONOMOUS',
-    pluginCount: allCorePlugins.length,
+    corePluginCount: allCorePlugins.length,
+    xeniReadPlugin: true,
+    totalPluginCount: plugins.length,
   });
 
   return toolkit;
