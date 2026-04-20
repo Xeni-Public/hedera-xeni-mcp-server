@@ -177,9 +177,9 @@ export async function runBootstrap(
  *
  * Excluded from coverage via v8-ignore: its only logic is the SDK method
  * chain + a `null topicId` defensive throw, both of which are covered
- * meaningfully by E2E in PR #16, not by a mock-heavy unit test.
+ * meaningfully by E2E in PR #17, not by a mock-heavy unit test.
  */
-/* v8 ignore start -- SDK wrapper; covered by E2E in PR #16 */
+/* v8 ignore start -- SDK wrapper; covered by E2E in PR #17 */
 export async function createTopicViaSdk(args: {
   env: BootstrapEnv;
   memo: string;
@@ -212,7 +212,7 @@ export async function createTopicViaSdk(args: {
 }
 /* v8 ignore stop */
 
-/* v8 ignore start -- CLI wiring; exercises env + real deps, covered by E2E in PR #16 */
+/* v8 ignore start -- CLI wiring; exercises env + real deps, covered by E2E in PR #17 */
 async function main(): Promise<void> {
   const env = loadBootstrapEnv();
   const agentId = process.env['HEDERA_AGENT_ID'];
@@ -236,7 +236,7 @@ async function main(): Promise<void> {
 }
 /* v8 ignore stop */
 
-/* v8 ignore start -- CLI entry point; invocation-scope, tested via E2E in PR #16 */
+/* v8 ignore start -- CLI entry point; invocation-scope, tested via E2E in PR #17 */
 // ESM entry-point guard: only run `main()` when this file is executed
 // directly via `tsx` / `node`, not when imported by unit tests. Same
 // pattern as `src/transports/http.ts`.

@@ -38,8 +38,8 @@ export default defineConfig({
         'src/plugins/xeniRead/index.ts',
         'src/plugins/xeniRead/mirrorNode.ts',
         'src/plugins/xeniRead/getTreasuryAllowanceRemaining.ts',
-        // Bootstrap scripts + shared lib (tested via test/unit/ as of PR #14)
-        // `main()` in each script is CLI-scope (v8 ignore) + covered by E2E PR #16.
+        // Bootstrap scripts + shared lib (tested via test/unit/ as of PR #15)
+        // `main()` in each script is CLI-scope (v8 ignore) + covered by E2E PR #17.
         'scripts/bootstrap-audit-topic.ts',
         'scripts/lib/bootstrapEnv.ts',
         'scripts/lib/mirrorLookup.ts',

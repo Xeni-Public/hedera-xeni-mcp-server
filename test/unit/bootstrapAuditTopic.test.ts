@@ -4,7 +4,7 @@
  * Unit tests for the pure-function exports of
  * `scripts/bootstrap-audit-topic.ts`.
  *
- * The `main()` function itself is CLI-scope and tested via E2E in PR #16.
+ * The `main()` function itself is CLI-scope and tested via E2E in PR #17.
  * The pure helpers (memo builder, Mirror Node key parser) + the DI'd
  * `runBootstrap` orchestrator are tested here so the idempotency-key
  * format, key-type dispatch, and both bootstrap branches (re-use / create)
