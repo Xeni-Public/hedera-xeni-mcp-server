@@ -61,6 +61,13 @@ Before requesting review:
 - [ ] New files include the `Authored-by: Anand Palanisamy - anand@xeni.com` header at the top (see existing files for per-type comment syntax)
 - [ ] No secrets, `.env` files, or private keys in the diff
 
+After review, before merge:
+
+- [ ] All blocking review items addressed
+- [ ] Non-blocking observations from review also addressed (default), OR each deferred with a rationale comment on the PR thread (only when genuinely out-of-scope or Phase 2+)
+
+Rationale for the "address non-blocking by default" rule: follow-up commits on non-blocking observations consistently improve PR quality at low cost. The rule was tightened on 2026-04-20 (issue #14). If you're about to skip an observation without addressing it, post a one-line reason on the thread first — silent skip is the only thing disallowed.
+
 For PRs that touch on-chain behavior (transfers, allowances, topics): also confirm testnet E2E green before merge.
 
 ## Security issues
