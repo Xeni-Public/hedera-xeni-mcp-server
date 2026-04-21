@@ -44,6 +44,10 @@ export default defineConfig({
         'scripts/bootstrap-treasury.ts',
         'scripts/lib/bootstrapEnv.ts',
         'scripts/lib/mirrorLookup.ts',
+        // Mirror Node pre-flight smoke-check (issue #22). `main()` is
+        // CLI-scope (v8 ignore) + covered by the nightly workflow step.
+        'scripts/smoke-mirror-node.ts',
+        'scripts/lib/mirrorSmoke.ts',
         // reference-impl specs (behavioral contracts for AgentService Go port)
         'reference-impl/hbar.ts',
         'reference-impl/hooks/auditEnvelopeBuilder.ts',
