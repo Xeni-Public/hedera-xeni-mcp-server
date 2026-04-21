@@ -73,6 +73,20 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Pre-flight gate (issue #22): probe every Mirror Node endpoint we
+      # depend on with HTTP 200 + shape-invariant assertions before the
+      # full E2E runs. If Mirror Node is down or has shape-shifted an
+      # endpoint (the issue-#18 bug class), this step fails fast and
+      # short-circuits the E2E step — much clearer signal than three
+      # cryptic E2E failures. Lead Buddy's Q1 answer: pre-flight gate.
+      - name: Mirror Node pre-flight smoke-check
+        env:
+          HEDERA_NETWORK: testnet
+          HEDERA_AGENT_ID: ${{ secrets.TESTNET_CI_AGENT_ID }}
+          HEDERA_XENI_TREASURY_ID: ${{ secrets.TESTNET_CI_TREASURY_ID }}
+          HEDERA_XENI_AUDIT_TOPIC_ID: ${{ secrets.TESTNET_CI_AUDIT_TOPIC_ID }}
+        run: npm run smoke:mirror-node
+
       - name: E2E tests
         env:
           NODE_ENV: test
