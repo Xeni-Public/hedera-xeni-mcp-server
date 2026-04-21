@@ -83,8 +83,13 @@ jobs:
           # verify correctly). See scripts/bootstrap-*.ts and
           # test/e2e/bootstrap-idempotency.e2e.test.ts.
           HEDERA_ENV_LABEL: testnet-ci
-          HEDERA_OPERATOR_ID: ${{ secrets.TESTNET_CI_OPERATOR_ID }}
-          HEDERA_OPERATOR_KEY: ${{ secrets.TESTNET_CI_OPERATOR_KEY }}
+          # Operator credentials (HEDERA_OPERATOR_ID / HEDERA_OPERATOR_KEY)
+          # are intentionally NOT set here (issue #21). The idempotent
+          # re-use path in bootstrap-idempotency.e2e.test.ts builds its
+          # own BootstrapEnv with a throwaway key; no other E2E test signs
+          # on behalf of the operator. Leaving these unset keeps
+          # warnIfColdKeyLeaked() silent during the nightly, preserving
+          # the cold-key invariant end-to-end.
           HEDERA_AGENT_ID: ${{ secrets.TESTNET_CI_AGENT_ID }}
           HEDERA_AGENT_KEY: ${{ secrets.TESTNET_CI_AGENT_KEY }}
           HEDERA_XENI_TREASURY_ID: ${{ secrets.TESTNET_CI_TREASURY_ID }}
