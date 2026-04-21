@@ -2,18 +2,20 @@
 
 /**
  * Unit tests for `scripts/lib/mirrorLookup.ts`. Mock `fetch` — no network
- * I/O. Covers the two lookup operations used by the bootstrap scripts:
- *   - findTopicByMemo (M3 idempotency preamble)
+ * I/O. Covers the three lookup operations used by the bootstrap scripts:
+ *   - fetchTopicMemo (M3 idempotency verification — issue #18 replacement
+ *     for the broken findTopicByMemo)
+ *   - fetchAccountMemo (M4 idempotency verification)
  *   - fetchAccountPublicKey (M3 agent-public-key lookup for submit_key)
  *
- * Plus the network-URL + error-path behaviors shared by both.
+ * Plus the network-URL + error-path behaviors shared by all three.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import {
   fetchAccountMemo,
   fetchAccountPublicKey,
-  findTopicByMemo,
+  fetchTopicMemo,
   mirrorNodeBaseUrl,
   type FetchFn,
 } from '../../scripts/lib/mirrorLookup.js';
@@ -46,96 +48,79 @@ describe('mirrorLookup / mirrorNodeBaseUrl', () => {
   });
 });
 
-describe('mirrorLookup / findTopicByMemo', () => {
-  it('returns the topic_id when a single-page result contains the memo', async () => {
+describe('mirrorLookup / fetchTopicMemo', () => {
+  it('returns the memo string on happy path', async () => {
     const fetchImpl = mockFetch({
-      body: {
-        topics: [
-          { topic_id: '0.0.9001', memo: 'other_memo' },
-          { topic_id: '0.0.9002', memo: 'xeni_audit_v1_dev' },
-        ],
-        links: { next: null },
-      },
+      body: { topic_id: '0.0.8719397', memo: 'xeni_audit_v1_testnet-ci' },
     });
-    const result = await findTopicByMemo('0.0.1001', 'xeni_audit_v1_dev', 'testnet', {
-      fetchImpl,
-    });
-    expect(result).toBe('0.0.9002');
+    const memo = await fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl });
+    expect(memo).toBe('xeni_audit_v1_testnet-ci');
   });
 
-  it('returns null when no topic matches', async () => {
-    const fetchImpl = mockFetch({
-      body: { topics: [{ topic_id: '0.0.9001', memo: 'unrelated' }], links: { next: null } },
-    });
-    const result = await findTopicByMemo('0.0.1001', 'xeni_audit_v1_dev', 'testnet', {
-      fetchImpl,
-    });
-    expect(result).toBeNull();
+  it('returns null when the topic has no memo (empty or missing field)', async () => {
+    const fetchImpl = mockFetch({ body: { topic_id: '0.0.8719397' } });
+    const memo = await fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl });
+    expect(memo).toBeNull();
   });
 
-  it('returns null when the topics array is empty', async () => {
-    const fetchImpl = mockFetch({ body: { topics: [], links: { next: null } } });
-    expect(
-      await findTopicByMemo('0.0.1001', 'xeni_audit_v1_dev', 'testnet', { fetchImpl }),
-    ).toBeNull();
+  it('returns empty string when memo is explicitly empty', async () => {
+    const fetchImpl = mockFetch({ body: { topic_id: '0.0.8719397', memo: '' } });
+    const memo = await fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl });
+    expect(memo).toBe('');
   });
 
-  it('paginates through multiple pages until a match is found', async () => {
-    const calls: string[] = [];
+  it('throws on HTTP 404 (topic not found)', async () => {
+    const fetchImpl = mockFetch({ ok: false, status: 404 });
+    await expect(fetchTopicMemo('0.0.9999', 'testnet', { fetchImpl })).rejects.toThrow(/HTTP 404/);
+  });
+
+  it('throws on general network error (no Mirror Node reachable)', async () => {
+    const fetchImpl = mockFetch({ throws: new TypeError('fetch failed') });
+    await expect(fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl })).rejects.toThrow(
+      /network error/,
+    );
+  });
+
+  it('throws on timeout (AbortError)', async () => {
+    const abortErr = new Error('aborted');
+    abortErr.name = 'AbortError';
+    const fetchImpl = mockFetch({ throws: abortErr });
+    await expect(
+      fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl, timeoutMs: 10 }),
+    ).rejects.toThrow(/timed out after 10ms/);
+  });
+
+  it('throws on non-object response (defensive)', async () => {
     const fetchImpl: FetchFn = vi.fn(
       // eslint-disable-next-line @typescript-eslint/require-await -- mock
-      async (url: string) => {
-        calls.push(url);
-        if (url.includes('page=2')) {
-          return {
-            ok: true,
-            status: 200,
-            // eslint-disable-next-line @typescript-eslint/require-await -- mock
-            json: async () => ({
-              topics: [{ topic_id: '0.0.9999', memo: 'xeni_audit_v1_dev' }],
-              links: { next: null },
-            }),
-          } as unknown as Response;
-        }
-        return {
+      async () =>
+        ({
           ok: true,
           status: 200,
           // eslint-disable-next-line @typescript-eslint/require-await -- mock
-          json: async () => ({
-            topics: [{ topic_id: '0.0.9001', memo: 'unrelated' }],
-            links: { next: '/api/v1/topics?page=2' },
-          }),
-        } as unknown as Response;
-      },
+          json: async () => 'string-not-object',
+        }) as unknown as Response,
     );
-
-    const result = await findTopicByMemo('0.0.1001', 'xeni_audit_v1_dev', 'testnet', {
-      fetchImpl,
-    });
-    expect(result).toBe('0.0.9999');
-    expect(calls).toHaveLength(2);
-    expect(calls[1]).toContain('page=2');
+    await expect(fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl })).rejects.toThrow(
+      /non-object body/,
+    );
   });
 
-  it('URL-encodes the operator ID in the query', async () => {
-    const fetchImpl = mockFetch({ body: { topics: [], links: { next: null } } });
-    await findTopicByMemo('0.0/1001', 'xeni_audit_v1_dev', 'testnet', { fetchImpl });
+  it('URL-encodes the topic ID in the path', async () => {
+    const fetchImpl = mockFetch({ body: { topic_id: '0.0/8719397', memo: 'x' } });
+    await fetchTopicMemo('0.0/8719397', 'testnet', { fetchImpl });
     const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
-    expect(url).toContain('0.0%2F1001');
+    expect(url).toContain('0.0%2F8719397');
   });
 
-  it('throws on HTTP non-2xx from Mirror Node', async () => {
-    const fetchImpl = mockFetch({ ok: false, status: 503 });
-    await expect(
-      findTopicByMemo('0.0.1001', 'xeni_audit_v1_dev', 'testnet', { fetchImpl }),
-    ).rejects.toThrow(/HTTP 503/);
-  });
-
-  it('throws on malformed response (missing topics array)', async () => {
-    const fetchImpl = mockFetch({ body: { notTopics: [] } });
-    await expect(
-      findTopicByMemo('0.0.1001', 'xeni_audit_v1_dev', 'testnet', { fetchImpl }),
-    ).rejects.toThrow(/missing "topics" array/);
+  it('hits the correct Mirror Node endpoint (regression-guard for issue #18)', async () => {
+    // The bug in PR #15 was that findTopicByMemo hit a non-existent endpoint
+    // (/api/v1/topics?account.id=...). Lock the correct endpoint shape in so
+    // a future refactor can't silently regress back to a list endpoint.
+    const fetchImpl = mockFetch({ body: { topic_id: '0.0.8719397', memo: 'm' } });
+    await fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl });
+    const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    expect(url).toBe('https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.8719397');
   });
 });
 
