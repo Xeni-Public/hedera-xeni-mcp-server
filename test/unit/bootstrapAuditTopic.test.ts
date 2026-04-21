@@ -75,11 +75,12 @@ describe('bootstrap-audit-topic / parseMirrorPublicKey', () => {
 describe('bootstrap-audit-topic / runBootstrap', () => {
   /**
    * Build a freshly-mocked deps bag for each test. Individual tests can
-   * override specific fields to exercise a particular branch.
+   * override specific fields to exercise a particular branch. Deps shape
+   * mirrors M4's `BootstrapTreasuryDeps` after the issue #18 fix.
    */
   function buildDeps(overrides: Partial<BootstrapAuditTopicDeps> = {}): BootstrapAuditTopicDeps {
     return {
-      findTopicByMemo: vi.fn(async () => null),
+      fetchTopicMemo: vi.fn(async () => null),
       fetchAccountPublicKey: vi.fn(async () => ({
         type: 'ECDSA_SECP256K1',
         hex: PrivateKey.generateECDSA().publicKey.toStringRaw(),
@@ -103,126 +104,160 @@ describe('bootstrap-audit-topic / runBootstrap', () => {
     };
   }
 
-  it('idempotent re-use path: returns existing topic without creating a new one', async () => {
-    const deps = buildDeps({
-      findTopicByMemo: vi.fn(async () => '0.0.8888'),
-    });
-    const result = await runBootstrap({ env: buildEnv(), agentId: '0.0.1002' }, deps);
+  // ==============================
+  // Path 1: existing + memo matches (idempotent re-use)
+  // ==============================
+  describe('existing HEDERA_XENI_AUDIT_TOPIC_ID + matching memo → idempotent re-use', () => {
+    it('returns created=false and does NOT call fetchAccountPublicKey / createTopic', async () => {
+      const deps = buildDeps({
+        fetchTopicMemo: vi.fn(async () => 'xeni_audit_v1_dev'),
+      });
+      const result = await runBootstrap(
+        { env: buildEnv(), agentId: '0.0.1002', existingTopicId: '0.0.8888' },
+        deps,
+      );
 
-    expect(result).toEqual({ topicId: '0.0.8888', created: false });
-    // Sanity: no new-topic-path calls fired
-    expect(deps.fetchAccountPublicKey).not.toHaveBeenCalled();
-    expect(deps.createTopic).not.toHaveBeenCalled();
-    // Machine output marks it "existing, unchanged"
-    expect(deps.printMachineOutput).toHaveBeenCalledWith('0.0.8888', 'existing, unchanged');
+      expect(result).toEqual({ topicId: '0.0.8888', created: false });
+      expect(deps.fetchAccountPublicKey).not.toHaveBeenCalled();
+      expect(deps.createTopic).not.toHaveBeenCalled();
+      expect(deps.printMachineOutput).toHaveBeenCalledWith('0.0.8888', 'existing, unchanged');
+    });
+
+    it('passes the right (topicId, network) to fetchTopicMemo for verification', async () => {
+      const deps = buildDeps({
+        fetchTopicMemo: vi.fn(async () => 'xeni_audit_v1_testnet-ci'),
+      });
+      const env = { ...buildEnv(), envLabel: 'testnet-ci' };
+      await runBootstrap({ env, agentId: '0.0.1002', existingTopicId: '0.0.8719397' }, deps);
+
+      expect(deps.fetchTopicMemo).toHaveBeenCalledWith('0.0.8719397', 'testnet');
+    });
   });
 
-  it('new-topic path: fetches agent key, creates topic, prints "newly created"', async () => {
-    const agentPubHex = PrivateKey.generateECDSA().publicKey.toStringRaw();
-    const deps = buildDeps({
-      findTopicByMemo: vi.fn(async () => null),
-      fetchAccountPublicKey: vi.fn(async () => ({ type: 'ECDSA_SECP256K1', hex: agentPubHex })),
-      createTopic: vi.fn(async () => ({
-        topicId: '0.0.9002',
-        transactionId: '0.0.1001@1234567890.123456789',
-      })),
+  // ==============================
+  // Path 2: existing + memo mismatch → throw
+  // ==============================
+  describe('existing HEDERA_XENI_AUDIT_TOPIC_ID + mismatched memo → throws loud', () => {
+    it('throws with a message naming actual + expected memo + topic ID', async () => {
+      const deps = buildDeps({
+        fetchTopicMemo: vi.fn(async () => 'some_other_memo'),
+      });
+      await expect(
+        runBootstrap({ env: buildEnv(), agentId: '0.0.1002', existingTopicId: '0.0.9999' }, deps),
+      ).rejects.toThrow(/0\.0\.9999.*some_other_memo.*xeni_audit_v1_dev/s);
+      expect(deps.fetchAccountPublicKey).not.toHaveBeenCalled();
+      expect(deps.createTopic).not.toHaveBeenCalled();
     });
-    const env = buildEnv();
-    const result = await runBootstrap({ env, agentId: '0.0.1002' }, deps);
 
-    expect(result).toEqual({ topicId: '0.0.9002', created: true });
-    expect(deps.fetchAccountPublicKey).toHaveBeenCalledWith('0.0.1002', 'testnet');
-    expect(deps.createTopic).toHaveBeenCalledOnce();
-    expect(deps.printMachineOutput).toHaveBeenCalledWith('0.0.9002', 'newly created');
+    it('throws when topic has no memo at all (null)', async () => {
+      const deps = buildDeps({
+        fetchTopicMemo: vi.fn(async () => null),
+      });
+      await expect(
+        runBootstrap({ env: buildEnv(), agentId: '0.0.1002', existingTopicId: '0.0.9999' }, deps),
+      ).rejects.toThrow(/not the expected "xeni_audit_v1_dev"/);
+    });
+
+    it('propagates fetchTopicMemo HTTP errors (404, 503, etc.) rather than silently proceeding', async () => {
+      const deps = buildDeps({
+        fetchTopicMemo: vi.fn(async () => {
+          throw new Error('Mirror Node returned HTTP 404 for /api/v1/topics/0.0.9999');
+        }),
+      });
+      await expect(
+        runBootstrap({ env: buildEnv(), agentId: '0.0.1002', existingTopicId: '0.0.9999' }, deps),
+      ).rejects.toThrow(/HTTP 404/);
+      // Never reached the create path
+      expect(deps.createTopic).not.toHaveBeenCalled();
+    });
   });
 
-  it('passes the memo "xeni_audit_v1_<envLabel>" through to both lookup and creation', async () => {
-    const deps = buildDeps();
-    const env = { ...buildEnv(), envLabel: 'testnet-uat' };
-    await runBootstrap({ env, agentId: '0.0.1002' }, deps);
+  // ==============================
+  // Path 3: no existing → create + print
+  // ==============================
+  describe('no HEDERA_XENI_AUDIT_TOPIC_ID → full bootstrap (create + print)', () => {
+    it('fetches agent key, creates topic, returns created=true', async () => {
+      const agentPubHex = PrivateKey.generateECDSA().publicKey.toStringRaw();
+      const deps = buildDeps({
+        fetchAccountPublicKey: vi.fn(async () => ({ type: 'ECDSA_SECP256K1', hex: agentPubHex })),
+      });
+      const result = await runBootstrap({ env: buildEnv(), agentId: '0.0.1002' }, deps);
 
-    expect(deps.findTopicByMemo).toHaveBeenCalledWith(
-      env.operatorId,
-      'xeni_audit_v1_testnet-uat',
-      'testnet',
-    );
-    const createCall = (deps.createTopic as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
-      memo: string;
-    };
-    expect(createCall.memo).toBe('xeni_audit_v1_testnet-uat');
-  });
-
-  it('wires admin_key = operator.publicKey and submit_key = agent.publicKey', async () => {
-    const env = buildEnv();
-    const agentKey = PrivateKey.generateECDSA();
-    const agentPubHex = agentKey.publicKey.toStringRaw();
-
-    const deps = buildDeps({
-      fetchAccountPublicKey: vi.fn(async () => ({ type: 'ECDSA_SECP256K1', hex: agentPubHex })),
+      expect(result).toEqual({ topicId: '0.0.9002', created: true });
+      expect(deps.fetchTopicMemo).not.toHaveBeenCalled(); // no existingTopicId → skip verification
+      expect(deps.fetchAccountPublicKey).toHaveBeenCalledWith('0.0.1002', 'testnet');
+      expect(deps.createTopic).toHaveBeenCalledOnce();
+      expect(deps.printMachineOutput).toHaveBeenCalledWith('0.0.9002', 'newly created');
     });
-    await runBootstrap({ env, agentId: '0.0.1002' }, deps);
 
-    const createCall = (deps.createTopic as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
-      adminKey: PublicKey;
-      submitKey: PublicKey;
-    };
-    // admin_key is the operator's public key (the operator holds admin authority
-    // for future submit-key rotation, topic metadata updates, etc.)
-    expect(createCall.adminKey.toStringRaw()).toBe(env.operatorKey.publicKey.toStringRaw());
-    // submit_key is the AGENT's public key (runtime signer), not the operator's
-    expect(createCall.submitKey.toStringRaw()).toBe(agentPubHex);
-    // Additional safety: they are NOT equal — a common bug would swap them
-    expect(createCall.adminKey.toStringRaw()).not.toBe(createCall.submitKey.toStringRaw());
-  });
+    it('passes memo "xeni_audit_v1_<envLabel>" to createTopic verbatim', async () => {
+      const deps = buildDeps();
+      const env = { ...buildEnv(), envLabel: 'testnet-uat' };
+      await runBootstrap({ env, agentId: '0.0.1002' }, deps);
 
-  it('parses ED25519 agent keys (Mirror Node may return either algorithm)', async () => {
-    const agentKey = PrivateKey.generateED25519();
-    const deps = buildDeps({
-      fetchAccountPublicKey: vi.fn(async () => ({
-        type: 'ED25519',
-        hex: agentKey.publicKey.toStringRaw(),
-      })),
+      const createCall = (deps.createTopic as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+        memo: string;
+      };
+      expect(createCall.memo).toBe('xeni_audit_v1_testnet-uat');
     });
-    const result = await runBootstrap({ env: buildEnv(), agentId: '0.0.1002' }, deps);
-    expect(result.created).toBe(true);
-    const createCall = (deps.createTopic as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
-      submitKey: PublicKey;
-    };
-    expect(createCall.submitKey.toStringRaw()).toBe(agentKey.publicKey.toStringRaw());
-  });
 
-  it('propagates errors from findTopicByMemo (fails loud — ops re-runs)', async () => {
-    const deps = buildDeps({
-      findTopicByMemo: vi.fn(async () => {
-        throw new Error('Mirror Node returned HTTP 503');
-      }),
-    });
-    await expect(runBootstrap({ env: buildEnv(), agentId: '0.0.1002' }, deps)).rejects.toThrow(
-      /HTTP 503/,
-    );
-  });
+    it('wires admin_key = operator.publicKey and submit_key = agent.publicKey', async () => {
+      const env = buildEnv();
+      const agentKey = PrivateKey.generateECDSA();
+      const agentPubHex = agentKey.publicKey.toStringRaw();
 
-  it('propagates errors from fetchAccountPublicKey (fails loud before createTopic fires)', async () => {
-    const deps = buildDeps({
-      fetchAccountPublicKey: vi.fn(async () => {
-        throw new Error('no single-key');
-      }),
-    });
-    await expect(runBootstrap({ env: buildEnv(), agentId: '0.0.1002' }, deps)).rejects.toThrow(
-      /no single-key/,
-    );
-    expect(deps.createTopic).not.toHaveBeenCalled();
-  });
+      const deps = buildDeps({
+        fetchAccountPublicKey: vi.fn(async () => ({ type: 'ECDSA_SECP256K1', hex: agentPubHex })),
+      });
+      await runBootstrap({ env, agentId: '0.0.1002' }, deps);
 
-  it('propagates errors from createTopic (SDK failure, no output printed)', async () => {
-    const deps = buildDeps({
-      createTopic: vi.fn(async () => {
-        throw new Error('INSUFFICIENT_PAYER_BALANCE');
-      }),
+      const createCall = (deps.createTopic as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+        adminKey: PublicKey;
+        submitKey: PublicKey;
+      };
+      expect(createCall.adminKey.toStringRaw()).toBe(env.operatorKey.publicKey.toStringRaw());
+      expect(createCall.submitKey.toStringRaw()).toBe(agentPubHex);
+      expect(createCall.adminKey.toStringRaw()).not.toBe(createCall.submitKey.toStringRaw());
     });
-    await expect(runBootstrap({ env: buildEnv(), agentId: '0.0.1002' }, deps)).rejects.toThrow(
-      /INSUFFICIENT_PAYER_BALANCE/,
-    );
-    expect(deps.printMachineOutput).not.toHaveBeenCalled();
+
+    it('parses ED25519 agent keys (Mirror Node may return either algorithm)', async () => {
+      const agentKey = PrivateKey.generateED25519();
+      const deps = buildDeps({
+        fetchAccountPublicKey: vi.fn(async () => ({
+          type: 'ED25519',
+          hex: agentKey.publicKey.toStringRaw(),
+        })),
+      });
+      const result = await runBootstrap({ env: buildEnv(), agentId: '0.0.1002' }, deps);
+      expect(result.created).toBe(true);
+      const createCall = (deps.createTopic as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+        submitKey: PublicKey;
+      };
+      expect(createCall.submitKey.toStringRaw()).toBe(agentKey.publicKey.toStringRaw());
+    });
+
+    it('propagates errors from fetchAccountPublicKey (fails loud before createTopic fires)', async () => {
+      const deps = buildDeps({
+        fetchAccountPublicKey: vi.fn(async () => {
+          throw new Error('no single-key');
+        }),
+      });
+      await expect(runBootstrap({ env: buildEnv(), agentId: '0.0.1002' }, deps)).rejects.toThrow(
+        /no single-key/,
+      );
+      expect(deps.createTopic).not.toHaveBeenCalled();
+    });
+
+    it('propagates errors from createTopic (SDK failure, no output printed)', async () => {
+      const deps = buildDeps({
+        createTopic: vi.fn(async () => {
+          throw new Error('INSUFFICIENT_PAYER_BALANCE');
+        }),
+      });
+      await expect(runBootstrap({ env: buildEnv(), agentId: '0.0.1002' }, deps)).rejects.toThrow(
+        /INSUFFICIENT_PAYER_BALANCE/,
+      );
+      expect(deps.printMachineOutput).not.toHaveBeenCalled();
+    });
   });
 });

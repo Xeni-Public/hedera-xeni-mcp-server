@@ -7,8 +7,8 @@
  * has the relevant ID set (which testnet-ci does after its one-time
  * bootstrap), follow the "existing" path rather than attempting to create
  * new on-chain state. This exercises the Mirror Node lookup layer end-
- * to-end (`findTopicByMemo` for M3, `fetchAccountMemo` for M4) against
- * the real API.
+ * to-end (`fetchTopicMemo` for M3, `fetchAccountMemo` for M4) against the
+ * real API.
  *
  * Scope: the CREATE paths (`createTopicViaSdk`, `createTreasuryViaSdk`,
  * `grantAllowanceViaSdk`) are NOT exercised here — they'd mint new
@@ -31,11 +31,7 @@ import {
   runBootstrap as runTreasuryBootstrap,
   type BootstrapTreasuryDeps,
 } from '../../scripts/bootstrap-treasury.js';
-import {
-  fetchAccountMemo,
-  fetchAccountPublicKey,
-  findTopicByMemo,
-} from '../../scripts/lib/mirrorLookup.js';
+import { fetchAccountMemo, fetchTopicMemo } from '../../scripts/lib/mirrorLookup.js';
 import { missingE2EEnv } from './_helpers.js';
 
 const missing = missingE2EEnv([
@@ -74,37 +70,39 @@ function capturingDeps(): {
 }
 
 describe.skipIf(missing.length > 0)('E2E / bootstrap idempotency (real Mirror Node)', () => {
-  it('M3 bootstrap-audit-topic re-run finds the existing topic by memo (no new tx)', async () => {
+  it('M3 bootstrap-audit-topic re-run verifies existing topic via memo check (no new tx)', async () => {
     const env = loadBootstrapEnv();
     const agentId = process.env['HEDERA_AGENT_ID']!;
+    const existingTopicId = process.env['HEDERA_XENI_AUDIT_TOPIC_ID']!;
     const { stdout, stderr, depOverrides } = capturingDeps();
 
-    // We wire the real Mirror Node helpers here (the goal is exactly
-    // to exercise them). The SDK wrappers are ALSO wired, but the
-    // idempotent path returns before calling them.
+    // Wire the real Mirror Node helper (`fetchTopicMemo`) — the whole
+    // point of this test is to exercise it against live Mirror Node.
+    // fetchAccountPublicKey + createTopic are NOT reached on the re-use
+    // path; stub them as throw-if-called guards so any regression that
+    // routes through the create path fails loudly rather than silently
+    // racking up nightly testnet cost.
     const deps: BootstrapAuditTopicDeps = {
-      findTopicByMemo,
-      fetchAccountPublicKey,
-      // createTopic SHOULD NOT fire on the idempotent path. Passing a
-      // throw-if-called stub so a regression (re-creating topics every
-      // night) fails loudly rather than silently racking up testnet
-      // cost.
+      fetchTopicMemo,
+      fetchAccountPublicKey: () => {
+        throw new Error('fetchAccountPublicKey must NOT be called on the idempotent re-use path');
+      },
       createTopic: () => {
         throw new Error(
-          'createTopic must NOT be called when HEDERA_XENI_AUDIT_TOPIC_ID memo already exists',
+          'createTopic must NOT be called when HEDERA_XENI_AUDIT_TOPIC_ID memo already matches',
         );
       },
       logStderr: depOverrides.logStderr,
       printMachineOutput: depOverrides.printMachineOutput,
     };
 
-    const result = await runAuditTopicBootstrap({ env, agentId }, deps);
+    const result = await runAuditTopicBootstrap({ env, agentId, existingTopicId }, deps);
 
     expect(result.created).toBe(false);
-    expect(result.topicId).toBe(process.env['HEDERA_XENI_AUDIT_TOPIC_ID']);
+    expect(result.topicId).toBe(existingTopicId);
     expect(stdout.join('\n')).toContain('existing, unchanged');
-    expect(stderr.join('\n')).toContain('found existing topic');
-  }, 60_000); // Mirror Node pagination walk can take a few seconds on testnet
+    expect(stderr.join('\n')).toContain('memo matches');
+  }, 30_000); // Mirror Node single-topic lookup is a direct GET /api/v1/topics/{id}
 
   it('M4 bootstrap-treasury re-run verifies memo match (no new tx, no key printed)', async () => {
     const env = loadBootstrapEnv();

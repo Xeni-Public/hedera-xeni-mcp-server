@@ -21,15 +21,27 @@
  *   HEDERA_ENV_LABEL         — "dev" | "testnet-ci" | "testnet-uat" | "mainnet-prod"
  *
  * Topic design (docs/DESIGN.md §5):
- *   - Memo: `xeni_audit_v1_<HEDERA_ENV_LABEL>` — doubles as idempotency key
- *     (re-runs find the existing topic via Mirror Node memo match rather
- *     than minting a duplicate).
+ *   - Memo: `xeni_audit_v1_<HEDERA_ENV_LABEL>` — validity check on re-run
+ *     (NOT a lookup key). Parallel to M4's use of `xeni_treasury_v1_<env>`.
  *   - Admin key: operator's public key — lets operator later rotate the
  *     submit key without recreating the topic (important for agent-key
  *     rotation scenarios).
  *   - Submit key: AGENT's public key — fetched from Mirror Node, not from
  *     env. Bootstrap env never holds the agent private key. At runtime,
  *     only the agent can submit; operator being cold is preserved.
+ *
+ * Idempotency (issue #18 — replaces PR #15's broken memo-walk):
+ *   Uses `HEDERA_XENI_AUDIT_TOPIC_ID` env var as the source-of-truth for
+ *   "already bootstrapped":
+ *     - If set: fetch the topic's memo from Mirror Node. If it matches
+ *       `xeni_audit_v1_<env>`, print the ID (unchanged) and exit 0. If
+ *       the memo doesn't match, throw loudly — ops almost certainly
+ *       pasted a wrong topic ID into the env.
+ *     - If unset: create a fresh topic + grant.
+ *   Parallel to M4's `bootstrap-treasury.ts` pattern. The original design
+ *   (walk operator's topics by memo) hit a Mirror Node endpoint that
+ *   doesn't exist (`/api/v1/topics?account.id=...` returns 404) — mocked
+ *   unit tests masked the bug until 2026-04-20 cutover.
  *
  * Output contract: one line to stdout in env-var format, so ops can pipe
  * the result straight into an env file if they want:
@@ -43,7 +55,7 @@
 import { pathToFileURL } from 'node:url';
 import { Client, PublicKey, TopicCreateTransaction, type TopicId } from '@hiero-ledger/sdk';
 import { loadBootstrapEnv, type BootstrapEnv } from './lib/bootstrapEnv.js';
-import { fetchAccountPublicKey, findTopicByMemo, type HederaNetwork } from './lib/mirrorLookup.js';
+import { fetchAccountPublicKey, fetchTopicMemo, type HederaNetwork } from './lib/mirrorLookup.js';
 
 /** Pure function: build the memo string for a given env label. */
 export function auditTopicMemo(envLabel: string): string {
@@ -80,15 +92,11 @@ function defaultPrintOutput(topicId: string, note: string): void {
  * as an interface so unit tests can inject fakes for Mirror Node lookups,
  * topic creation, and stdout/stderr without touching the SDK or env.
  *
- * In production use, `runCliBootstrap` below wires these to real
- * Mirror Node calls + Hiero SDK calls; in tests, each field is a mock.
+ * In production use, `main()` below wires these to real Mirror Node
+ * calls + Hiero SDK calls; in tests, each field is a mock.
  */
 export interface BootstrapAuditTopicDeps {
-  findTopicByMemo: (
-    operatorId: string,
-    memo: string,
-    network: HederaNetwork,
-  ) => Promise<string | null>;
+  fetchTopicMemo: (topicId: string, network: HederaNetwork) => Promise<string | null>;
   fetchAccountPublicKey: (
     accountId: string,
     network: HederaNetwork,
@@ -111,23 +119,35 @@ export interface BootstrapAuditTopicDeps {
 export interface RunBootstrapInput {
   env: BootstrapEnv;
   agentId: string;
+  /**
+   * If already set in the ops env, bootstrap verifies the topic's memo
+   * matches the expected `xeni_audit_v1_<env>` pattern rather than
+   * creating a new topic. Unset = first-time bootstrap.
+   */
+  existingTopicId?: string;
+}
+
+/** Returned to caller + tests — describes what actually happened. */
+export interface RunBootstrapResult {
+  topicId: string;
+  created: boolean;
 }
 
 /**
- * Core orchestration — testable without a real network or SDK client.
- * Splits the two paths (existing-topic / new-topic) so tests can exercise
- * both via injected deps. Returns the topic ID so callers / tests can
- * assert on it.
+ * Core orchestration — DI'd so unit tests cover all three branches
+ * (existing+match / existing+mismatch / no-existing+create) without
+ * touching the Hiero SDK or a real network. Mirrors the `runBootstrap`
+ * shape from M4's `bootstrap-treasury.ts`.
  *
- * Design rationale: `main()` being un-unit-testable because it reaches
- * for SDK + env directly would collapse bootstrap-script coverage below
- * threshold. DI here makes the happy path + idempotent-re-use path
- * explicitly covered without mocking the whole Hiero SDK.
+ * Three branches:
+ *   1. existingTopicId + memo matches  → print ID, return created=false
+ *   2. existingTopicId + memo mismatch → throw (wrong ID in env)
+ *   3. no existingTopicId              → create, print ID + cold key
  */
 export async function runBootstrap(
   input: RunBootstrapInput,
   deps: BootstrapAuditTopicDeps,
-): Promise<{ topicId: string; created: boolean }> {
+): Promise<RunBootstrapResult> {
   const { env, agentId } = input;
   const memo = auditTopicMemo(env.envLabel);
 
@@ -135,22 +155,30 @@ export async function runBootstrap(
     `[bootstrap-audit-topic] env=${env.envLabel} network=${env.network} operator=${env.operatorId} agent=${agentId} memo="${memo}"`,
   );
 
-  // ---- Idempotency preamble ----
-  deps.logStderr(
-    '[bootstrap-audit-topic] checking Mirror Node for existing topic with this memo...',
-  );
-  const existing = await deps.findTopicByMemo(env.operatorId, memo, env.network);
-  if (existing) {
+  // ---- Idempotent re-use path (env var set) ----
+  if (input.existingTopicId) {
     deps.logStderr(
-      `[bootstrap-audit-topic] found existing topic ${existing} — re-using, no new tx.`,
+      `[bootstrap-audit-topic] HEDERA_XENI_AUDIT_TOPIC_ID=${input.existingTopicId} already set — verifying via Mirror Node...`,
     );
-    deps.printMachineOutput(existing, 'existing, unchanged');
-    return { topicId: existing, created: false };
+    const foundMemo = await deps.fetchTopicMemo(input.existingTopicId, env.network);
+    if (foundMemo !== memo) {
+      throw new Error(
+        `HEDERA_XENI_AUDIT_TOPIC_ID=${input.existingTopicId} exists but its memo is ${JSON.stringify(foundMemo)}, ` +
+          `not the expected "${memo}". Either you pasted the wrong topic ID into the env, or this is a ` +
+          `different env's audit topic. Refusing to proceed — clear HEDERA_XENI_AUDIT_TOPIC_ID and re-run ` +
+          `to create a fresh topic, or correct the ID in the env file.`,
+      );
+    }
+    deps.logStderr(
+      `[bootstrap-audit-topic] memo matches — topic already bootstrapped for this env.`,
+    );
+    deps.printMachineOutput(input.existingTopicId, 'existing, unchanged');
+    return { topicId: input.existingTopicId, created: false };
   }
 
-  // ---- New topic path ----
+  // ---- New topic path (env var not set) ----
   deps.logStderr(
-    '[bootstrap-audit-topic] no existing topic; fetching agent public key for submit_key...',
+    '[bootstrap-audit-topic] no existing topic in env; fetching agent public key for submit_key...',
   );
   const agentKeyRecord = await deps.fetchAccountPublicKey(agentId, env.network);
   const agentPublicKey = parseMirrorPublicKey(agentKeyRecord.type, agentKeyRecord.hex);
@@ -225,10 +253,20 @@ async function main(): Promise<void> {
     );
   }
 
+  // Idempotency input (optional): if ops has already bootstrapped this
+  // env and pasted HEDERA_XENI_AUDIT_TOPIC_ID back into the .env file,
+  // the script verifies the topic's memo rather than creating a new one.
+  const rawExisting = process.env['HEDERA_XENI_AUDIT_TOPIC_ID'];
+  const existingTopicId = rawExisting && rawExisting.trim() !== '' ? rawExisting.trim() : undefined;
+
   await runBootstrap(
-    { env, agentId },
     {
-      findTopicByMemo,
+      env,
+      agentId,
+      ...(existingTopicId !== undefined ? { existingTopicId } : {}),
+    },
+    {
+      fetchTopicMemo,
       fetchAccountPublicKey,
       createTopic: createTopicViaSdk,
       logStderr: defaultLogStderr,

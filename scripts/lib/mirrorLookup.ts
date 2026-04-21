@@ -3,14 +3,24 @@
 /**
  * Mirror Node lookups used by bootstrap scripts.
  *
- * Two operations:
- *   - `findTopicByMemo(operatorId, memo, network)` — idempotency preamble
- *     for M3. If a topic with this memo already exists under the operator,
- *     we re-use it rather than minting a duplicate.
+ * Three operations:
+ *   - `fetchTopicMemo(topicId, network)` — idempotency verification for M3.
+ *     Given a pre-configured `HEDERA_XENI_AUDIT_TOPIC_ID`, fetches the
+ *     topic's current memo so `runBootstrap` can assert it matches the
+ *     expected `xeni_audit_v1_<env>` pattern.
+ *   - `fetchAccountMemo(accountId, network)` — same shape for M4's
+ *     `HEDERA_XENI_TREASURY_ID` verification.
  *   - `fetchAccountPublicKey(accountId, network)` — M3 needs the agent's
  *     public key to set as the topic's `submit_key`. Rather than requiring
  *     the bootstrap env to carry the agent's private key (distinct cold-key
  *     concern), we look it up from Mirror Node — public by definition.
+ *
+ * NOTE (issue #18): the previous `findTopicByMemo` function has been
+ * removed. It hit a non-existent Mirror Node endpoint
+ * (`/api/v1/topics?account.id=...`) that returned 404 on any real call.
+ * Unit tests mocked the fetch response shape and missed the bug.
+ * Replacement strategy mirrors M4: ops sets `HEDERA_XENI_AUDIT_TOPIC_ID`
+ * in env, the bootstrap script verifies its memo via `fetchTopicMemo`.
  *
  * Shares the same `fetch` wrapper shape as
  * `src/plugins/xeniRead/mirrorNode.ts` for consistency: 5s default timeout
@@ -76,67 +86,45 @@ async function fetchJson(url: string, options: LookupOptions): Promise<unknown> 
 }
 
 /**
- * Mirror Node /api/v1/topics response — only the fields we use.
+ * Mirror Node /api/v1/topics/{id} response — only the fields we use.
+ * `admin_key` and `submit_key` shape is documented but not consumed here
+ * (bootstrap verification only needs the memo).
  * See https://docs.hedera.com/hedera/mirror-node-api/rest-api
  */
-interface MirrorTopicListResponse {
-  topics?: Array<{
-    topic_id: string;
-    memo?: string;
-    admin_key?: { _type: string; key: string } | null;
-  }>;
+interface MirrorTopicInfo {
+  topic_id?: string;
+  memo?: string;
+  admin_key?: { _type: string; key: string } | null;
+  submit_key?: { _type: string; key: string } | null;
 }
 
 /**
- * Find a topic by exact memo match under the given account (operator) as
- * the tx payer. Returns the first match's topic ID, or `null` if none.
+ * Fetch a topic's memo from Mirror Node. Returns the memo string, or
+ * `null` if the topic exists but has no memo. Throws if the topic
+ * doesn't exist (HTTP 404 bubbles up as a Mirror Node error).
  *
- * Mirror Node's `/api/v1/topics` endpoint accepts an `account.id` filter
- * (limited by the payer of the creating tx) plus a memo filter via
- * post-filter. We page through until we either find the memo match or
- * exhaust results.
+ * Parallel shape to `fetchAccountMemo`. Used by M3 bootstrap to VERIFY
+ * that a pre-configured `HEDERA_XENI_AUDIT_TOPIC_ID` actually points to
+ * a Xeni-bootstrapped audit topic (memo matches `xeni_audit_v1_<env>`) —
+ * catches the footgun where ops pastes a wrong topic ID into the env.
  *
- * Kept defensive: if the response shape is unexpected, throw loudly with
- * a snippet — consistent with the rest of our Mirror Node wrappers.
- *
- * Scale note: we page through Mirror Node results in descending order
- * (most-recent first) until the memo is found or pages are exhausted.
- * At v1 scale (one `xeni_audit` topic per env × ~4 envs under the
- * operator) this is O(1). If a future operator ever accumulates tens of
- * thousands of topics AND the target `xeni_audit_v1_<env>` memo is on an
- * old page, this walk is linear in page count — still correct, just not
- * constant-time. No silent cap: if pages run out without a match, we
- * return `null` and the caller creates a fresh topic.
+ * This is the correct replacement for the removed `findTopicByMemo`
+ * (issue #18): it hits `/api/v1/topics/{id}` (a real Mirror Node
+ * endpoint) rather than the fictional `/api/v1/topics?account.id=...`.
  */
-export async function findTopicByMemo(
-  operatorId: string,
-  memo: string,
+export async function fetchTopicMemo(
+  topicId: string,
   network: HederaNetwork,
   options: LookupOptions = {},
 ): Promise<string | null> {
   const baseUrl = options.baseUrl ?? mirrorNodeBaseUrl(network);
-  // `order=desc` puts the most-recently-created topic first — for the
-  // common case (ops re-running M3 to confirm the recent topic), we match
-  // on page 1 and never paginate.
-  let url: string | null =
-    `${baseUrl}/api/v1/topics?account.id=${encodeURIComponent(operatorId)}&limit=100&order=desc`;
+  const url = `${baseUrl}/api/v1/topics/${encodeURIComponent(topicId)}`;
+  const body = (await fetchJson(url, options)) as MirrorTopicInfo;
 
-  while (url) {
-    const body = (await fetchJson(url, options)) as MirrorTopicListResponse;
-    if (!body || typeof body !== 'object' || !Array.isArray(body.topics)) {
-      throw new Error(
-        `Mirror Node /api/v1/topics response missing "topics" array: ${JSON.stringify(body).slice(0, 200)}`,
-      );
-    }
-    for (const t of body.topics) {
-      if (t.memo === memo) return t.topic_id;
-    }
-    // Pagination: Mirror Node returns `links.next` with a relative path.
-    const links = (body as unknown as { links?: { next?: string | null } }).links;
-    url = links?.next ? `${baseUrl}${links.next}` : null;
+  if (!body || typeof body !== 'object') {
+    throw new Error(`Mirror Node /topics/${topicId} returned non-object body.`);
   }
-
-  return null;
+  return typeof body.memo === 'string' ? body.memo : null;
 }
 
 /**
