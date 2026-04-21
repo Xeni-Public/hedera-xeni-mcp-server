@@ -22,7 +22,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { loadBootstrapEnv } from '../../scripts/lib/bootstrapEnv.js';
+import { PrivateKey } from '@hiero-ledger/sdk';
+import type { BootstrapEnv } from '../../scripts/lib/bootstrapEnv.js';
 import {
   runBootstrap as runAuditTopicBootstrap,
   type BootstrapAuditTopicDeps,
@@ -39,6 +40,41 @@ const missing = missingE2EEnv([
   'HEDERA_XENI_TREASURY_ID',
   'HEDERA_XENI_AUDIT_TOPIC_ID',
 ]);
+
+/**
+ * Build a BootstrapEnv for the idempotent re-use path without going through
+ * `loadBootstrapEnv()`.
+ *
+ * `loadBootstrapEnv()` reads `HEDERA_OPERATOR_ID` + `HEDERA_OPERATOR_KEY`
+ * from `process.env` and fail-validates the key's ECDSA format. In CI, that
+ * forces the workflow env block to include `HEDERA_OPERATOR_KEY` — which
+ * then trips `warnIfColdKeyLeaked()` in `src/accounts.ts` when the
+ * server-wiring E2E runs in the same process (issue #21).
+ *
+ * The idempotent re-use path never signs anything on behalf of the
+ * operator: `createTopic`, `createTreasury`, and `grantAllowance` are
+ * wired as throw-if-called stubs in both M3 and M4 tests below. The
+ * operator key would only matter if control reached those stubs — by
+ * design, it can't. So a freshly-generated throwaway ECDSA key satisfies
+ * the type without ever being exercised.
+ *
+ * `network` + `envLabel` are still read from `process.env` because the
+ * Mirror Node base URL and the expected memo string both depend on them.
+ */
+function buildReuseEnv(): BootstrapEnv {
+  const rawNetwork = process.env['HEDERA_NETWORK'];
+  if (rawNetwork !== 'testnet' && rawNetwork !== 'mainnet') {
+    throw new Error(
+      `HEDERA_NETWORK must be "testnet" or "mainnet" for this E2E, got: "${rawNetwork ?? ''}"`,
+    );
+  }
+  return {
+    operatorId: '0.0.0',
+    operatorKey: PrivateKey.generateECDSA(),
+    network: rawNetwork,
+    envLabel: process.env['HEDERA_ENV_LABEL']!,
+  };
+}
 
 /**
  * Capture printStdout/logStderr into arrays so test assertions can check
@@ -71,7 +107,7 @@ function capturingDeps(): {
 
 describe.skipIf(missing.length > 0)('E2E / bootstrap idempotency (real Mirror Node)', () => {
   it('M3 bootstrap-audit-topic re-run verifies existing topic via memo check (no new tx)', async () => {
-    const env = loadBootstrapEnv();
+    const env = buildReuseEnv();
     const agentId = process.env['HEDERA_AGENT_ID']!;
     const existingTopicId = process.env['HEDERA_XENI_AUDIT_TOPIC_ID']!;
     const { stdout, stderr, depOverrides } = capturingDeps();
@@ -105,7 +141,7 @@ describe.skipIf(missing.length > 0)('E2E / bootstrap idempotency (real Mirror No
   }, 30_000); // Mirror Node single-topic lookup is a direct GET /api/v1/topics/{id}
 
   it('M4 bootstrap-treasury re-run verifies memo match (no new tx, no key printed)', async () => {
-    const env = loadBootstrapEnv();
+    const env = buildReuseEnv();
     const agentId = process.env['HEDERA_AGENT_ID']!;
     const existingTreasuryId = process.env['HEDERA_XENI_TREASURY_ID']!;
     const { stdout, stderr, depOverrides } = capturingDeps();

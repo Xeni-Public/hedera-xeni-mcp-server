@@ -12,16 +12,20 @@
  */
 
 /**
- * Env vars required for ALL e2e tests (operator + agent + network + env label).
- * Additional test-specific vars (treasury, audit topic) are checked per-file.
+ * Env vars required for ALL e2e tests (agent + network).
+ * Additional test-specific vars (treasury, audit topic, env label) are
+ * checked per-file.
+ *
+ * Operator credentials (`HEDERA_OPERATOR_ID` / `HEDERA_OPERATOR_KEY`) are
+ * deliberately NOT in this list (issue #21). None of our E2E tests sign
+ * anything on behalf of the operator: `bootstrap-idempotency.e2e.test.ts`
+ * uses a manually-built `BootstrapEnv` on the idempotent re-use path
+ * (throw-if-called stubs guard the create paths), and `audit-flow` /
+ * `server-wiring` use the agent identity. Keeping operator credentials
+ * out of the runtime env prevents `warnIfColdKeyLeaked()` from firing in
+ * the E2E job and preserves the cold-key invariant end-to-end.
  */
-const REQUIRED_BASE_ENV = [
-  'HEDERA_OPERATOR_ID',
-  'HEDERA_OPERATOR_KEY',
-  'HEDERA_AGENT_ID',
-  'HEDERA_AGENT_KEY',
-  'HEDERA_NETWORK',
-] as const;
+const REQUIRED_BASE_ENV = ['HEDERA_AGENT_ID', 'HEDERA_AGENT_KEY', 'HEDERA_NETWORK'] as const;
 
 /**
  * Returns the list of missing env vars. Empty array = all present.
