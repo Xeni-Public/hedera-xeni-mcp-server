@@ -48,10 +48,16 @@ jobs:
 
   # E2E runs on a schedule, not on every PR (docs/DESIGN.md §14).
   # Reason: testnet HBAR cost + latency.
+  #
+  # `workflow_dispatch` also gated in so ops can trigger a run on-demand
+  # after a bootstrap (e.g. post-M3/M4 cutover, before first 10:00 UTC
+  # nightly fires). Matches the push+pull_request+schedule pattern: the
+  # workflow is triggered, but only `e2e-nightly` is opt-in beyond the
+  # default lint/build/test path.
   e2e-nightly:
     name: E2E on testnet-ci
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
 
