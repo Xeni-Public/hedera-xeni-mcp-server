@@ -36,9 +36,15 @@ export interface GetTreasuryAllowanceRemainingDeps {
   /** Agent account RECEIVING the allowance (spender). */
   agentAccountId: string;
   /**
-   * Hedera network — "testnet" | "mainnet". Kept on deps for log context
-   * (observability) even though it isn't used to derive the Mirror Node
-   * URL anymore (see `mirrorNodeUrl` below).
+   * Hedera network label — "testnet" | "mainnet". Two concrete uses:
+   *   1. Included in the `log.info('get_treasury_allowance_remaining', ...)`
+   *      call inside `execute`, so ops can grep runtime logs by network
+   *      to distinguish testnet vs mainnet traffic on a mixed-env host.
+   *   2. Interpolated into `humanMessage` (the tool's human-readable
+   *      response surface) so AgentService logs + user-visible messages
+   *      both name the network the balance was read from.
+   *
+   * Not used for URL derivation anymore — see `mirrorNodeUrl` below.
    */
   network: string;
   /**
