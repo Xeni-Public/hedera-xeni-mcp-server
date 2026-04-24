@@ -244,12 +244,14 @@ Already registered on our toolkit via `allCorePlugins` (`coreMiscQueriesPlugin`)
     "current_rate": {
       "cent_equivalent": 596987,
       "hbar_equivalent": 30000,
-      "expiration_time": "..."
+      "expiration_time": 1776925010
     },
     "next_rate": { ... },
-    "timestamp": "..."
+    "timestamp": "1776924000.000000000"
   }
   ```
+
+  Type note: `cent_equivalent`, `hbar_equivalent`, and `expiration_time` are all **numbers** (with `expiration_time` in Unix seconds). `timestamp` is a **string** (Mirror Node's consensus-timestamp format `seconds.nanos`). Parse `expiration_time` as a number; parsing it as a string will yield `NaN` downstream.
 
 - **What it does NOT do:** take a fiat amount and return an HBAR amount (and vice versa). The tool returns a **rate**; the caller does the math.
 
@@ -278,9 +280,11 @@ Callers should compute in the smallest unit they care about (tinybar / cents) to
 | **Store both sides when persisting.** | Audit events, intent rows, HCS envelopes SHOULD carry both the HBAR amount and the USD-equivalent AT TX TIME. The rate at audit replay time will differ; storing both values is cheap and makes post-hoc reconciliation deterministic. |
 | **Fail fast on zero / negative components.** | A `cent_equivalent` or `hbar_equivalent` of 0 means Mirror Node returned garbage — surface this rather than compute a `NaN` or `Infinity` downstream. |
 
+**Known transitional exception (2026-04-23):** AgentService's forward-payment (`services/intentService/payment_outcome.go`) + refund (`approveService.go`) paths currently use a static config-rate (`coingecko.static_hbar_rate`) set at service start, not a per-request `get_exchange_rate_tool` call. Migration tracked in [ai-agent-api-service #90](https://github.com/xeni-app/ai-agent-api-service/issues/90). Until that lands, live code on those two paths diverges from the convention above — any **new** code or flow should still follow the dynamic-per-request rule.
+
 ### 6.4 Multi-currency gap (Phase 2)
 
-Mirror Node only serves HBAR/USD. For **EUR, INR, GBP, or any other fiat**, we'd need an external oracle (CoinGecko, CoinMarketCap, fxrates, etc.) — not shipped in v1.
+Mirror Node only serves HBAR/USD. For **EUR, INR, GBP, or any other fiat**, we'd need an external oracle — CoinGecko (primary candidate), or equivalent. Not shipped in v1.
 
 Candidate Xeni-owned tool when the need arises: `get_hbar_fiat_rate` wrapping CoinGecko's `/simple/price?ids=hedera-hashgraph&vs_currencies=...`, with the same "dynamic per-request + fail-fast" posture as `get_treasury_allowance_remaining`.
 
