@@ -101,6 +101,8 @@ describe('bootstrap-audit-topic / runBootstrap', () => {
       operatorKey: PrivateKey.generateECDSA(),
       network: 'testnet',
       envLabel: 'dev',
+      mirrorNodeUrl: 'https://testnet.mirrornode.hedera.com',
+      hashscanBaseUrl: 'https://hashscan.io',
     };
   }
 
@@ -123,14 +125,17 @@ describe('bootstrap-audit-topic / runBootstrap', () => {
       expect(deps.printMachineOutput).toHaveBeenCalledWith('0.0.8888', 'existing, unchanged');
     });
 
-    it('passes the right (topicId, network) to fetchTopicMemo for verification', async () => {
+    it('passes the right (topicId, mirrorNodeUrl) to fetchTopicMemo for verification', async () => {
       const deps = buildDeps({
         fetchTopicMemo: vi.fn(async () => 'xeni_audit_v1_testnet-ci'),
       });
       const env = { ...buildEnv(), envLabel: 'testnet-ci' };
       await runBootstrap({ env, agentId: '0.0.1002', existingTopicId: '0.0.8719397' }, deps);
 
-      expect(deps.fetchTopicMemo).toHaveBeenCalledWith('0.0.8719397', 'testnet');
+      expect(deps.fetchTopicMemo).toHaveBeenCalledWith(
+        '0.0.8719397',
+        'https://testnet.mirrornode.hedera.com',
+      );
     });
   });
 
@@ -185,7 +190,10 @@ describe('bootstrap-audit-topic / runBootstrap', () => {
 
       expect(result).toEqual({ topicId: '0.0.9002', created: true });
       expect(deps.fetchTopicMemo).not.toHaveBeenCalled(); // no existingTopicId → skip verification
-      expect(deps.fetchAccountPublicKey).toHaveBeenCalledWith('0.0.1002', 'testnet');
+      expect(deps.fetchAccountPublicKey).toHaveBeenCalledWith(
+        '0.0.1002',
+        'https://testnet.mirrornode.hedera.com',
+      );
       expect(deps.createTopic).toHaveBeenCalledOnce();
       expect(deps.printMachineOutput).toHaveBeenCalledWith('0.0.9002', 'newly created');
     });

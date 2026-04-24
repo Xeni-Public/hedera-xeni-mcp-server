@@ -35,14 +35,22 @@ export interface GetTreasuryAllowanceRemainingDeps {
   treasuryAccountId: string;
   /** Agent account RECEIVING the allowance (spender). */
   agentAccountId: string;
-  /** Hedera network — selects Mirror Node base URL. */
+  /**
+   * Hedera network — "testnet" | "mainnet". Kept on deps for log context
+   * (observability) even though it isn't used to derive the Mirror Node
+   * URL anymore (see `mirrorNodeUrl` below).
+   */
   network: string;
+  /**
+   * Mirror Node base URL (REQUIRED — no default). Loaded from
+   * `HEDERA_MIRROR_NODE_URL` by `loadConfig()` and bound at registration
+   * time. See docs/DESIGN.md §3 "External URLs — required env, fail-fast".
+   */
+  mirrorNodeUrl: string;
   /** Optional fetch override for tests. */
   fetchImpl?: FetchFn;
   /** Optional timeout override (ms). Default 5000. */
   timeoutMs?: number;
-  /** Optional base URL override (rarely needed; tests use mock). */
-  baseUrl?: string;
 }
 
 /**
@@ -83,10 +91,9 @@ export function makeGetTreasuryAllowanceRemainingTool(
       const fetchOpts: Parameters<typeof fetchCryptoAllowances>[3] = {};
       if (deps.fetchImpl) fetchOpts.fetchImpl = deps.fetchImpl;
       if (deps.timeoutMs !== undefined) fetchOpts.timeoutMs = deps.timeoutMs;
-      if (deps.baseUrl !== undefined) fetchOpts.baseUrl = deps.baseUrl;
 
       const res = await fetchCryptoAllowances(
-        deps.network,
+        deps.mirrorNodeUrl,
         deps.treasuryAccountId,
         deps.agentAccountId,
         fetchOpts,

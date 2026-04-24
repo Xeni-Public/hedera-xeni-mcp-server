@@ -31,7 +31,6 @@ import {
   type ProbeDeps,
   type ProbeResult,
 } from './lib/mirrorSmoke.js';
-import type { HederaNetwork } from './lib/mirrorLookup.js';
 
 /* v8 ignore start -- Trivial console-wrapping default; business logic uses the injected dep. */
 function defaultLogStderr(message: string): void {
@@ -99,14 +98,15 @@ function requireEnv(name: string): string {
 }
 
 async function main(): Promise<void> {
-  const rawNetwork = requireEnv('HEDERA_NETWORK');
-  if (rawNetwork !== 'testnet' && rawNetwork !== 'mainnet') {
-    throw new Error(`HEDERA_NETWORK must be "testnet" or "mainnet", got: "${rawNetwork}"`);
-  }
-  const network: HederaNetwork = rawNetwork;
+  // HEDERA_NETWORK isn't needed by the probes directly — the smoke-check
+  // URLs are fully resolved from HEDERA_MIRROR_NODE_URL (which already
+  // encodes the network at the hostname level). Keeping the network read
+  // out of this script means `npm run smoke:mirror-node` can run with the
+  // minimum env surface: URL + three Hedera IDs.
+  const mirrorNodeUrl = requireEnv('HEDERA_MIRROR_NODE_URL');
 
   const probes = buildProbes({
-    network,
+    mirrorNodeUrl,
     topicId: requireEnv('HEDERA_XENI_AUDIT_TOPIC_ID'),
     agentAccountId: requireEnv('HEDERA_AGENT_ID'),
     treasuryAccountId: requireEnv('HEDERA_XENI_TREASURY_ID'),

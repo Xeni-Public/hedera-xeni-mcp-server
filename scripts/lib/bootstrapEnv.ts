@@ -25,6 +25,20 @@ export interface BootstrapEnv {
   network: 'testnet' | 'mainnet';
   /** Env label for the topic memo + log readability. */
   envLabel: string;
+  /**
+   * Mirror Node base URL — required, no default. Loaded from
+   * `HEDERA_MIRROR_NODE_URL`. Every fetch helper in `mirrorLookup.ts`
+   * takes this as an explicit argument; the env var is the single
+   * source of truth. See docs/DESIGN.md §3.
+   */
+  mirrorNodeUrl: string;
+  /**
+   * HashScan explorer base URL — required, no default. Loaded from
+   * `HEDERA_HASHSCAN_BASE_URL`. Used for runbook log hints (`${base}/
+   * ${network}/account/${id}`) and future deep-links. Required for
+   * parity with the runtime server's same-vars posture.
+   */
+  hashscanBaseUrl: string;
 }
 
 function requireEnv(name: string): string {
@@ -65,10 +79,18 @@ export function loadBootstrapEnv(): BootstrapEnv {
 
   const envLabel = requireEnv('HEDERA_ENV_LABEL');
 
+  // Both URLs are required in every env (dev, testnet-ci, testnet-uat,
+  // mainnet-prod). No hardcoded default — a silent fallback would let a
+  // testnet key run against mainnet or vice versa without failing.
+  const mirrorNodeUrl = requireEnv('HEDERA_MIRROR_NODE_URL');
+  const hashscanBaseUrl = requireEnv('HEDERA_HASHSCAN_BASE_URL');
+
   return {
     operatorId,
     operatorKey,
     network: rawNetwork,
     envLabel,
+    mirrorNodeUrl,
+    hashscanBaseUrl,
   };
 }

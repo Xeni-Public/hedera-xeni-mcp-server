@@ -85,6 +85,9 @@ jobs:
           HEDERA_AGENT_ID: ${{ secrets.TESTNET_CI_AGENT_ID }}
           HEDERA_XENI_TREASURY_ID: ${{ secrets.TESTNET_CI_TREASURY_ID }}
           HEDERA_XENI_AUDIT_TOPIC_ID: ${{ secrets.TESTNET_CI_AUDIT_TOPIC_ID }}
+          # Required, no default — see docs/DESIGN.md §3 "External URLs".
+          HEDERA_MIRROR_NODE_URL: https://testnet.mirrornode.hedera.com
+          HEDERA_HASHSCAN_BASE_URL: https://hashscan.io
         run: npm run smoke:mirror-node
 
       - name: E2E tests
@@ -108,4 +111,7 @@ jobs:
           HEDERA_AGENT_KEY: ${{ secrets.TESTNET_CI_AGENT_KEY }}
           HEDERA_XENI_TREASURY_ID: ${{ secrets.TESTNET_CI_TREASURY_ID }}
           HEDERA_XENI_AUDIT_TOPIC_ID: ${{ secrets.TESTNET_CI_AUDIT_TOPIC_ID }}
+          # Required, no default — see docs/DESIGN.md §3 "External URLs".
+          HEDERA_MIRROR_NODE_URL: https://testnet.mirrornode.hedera.com
+          HEDERA_HASHSCAN_BASE_URL: https://hashscan.io
         run: npm run test:e2e

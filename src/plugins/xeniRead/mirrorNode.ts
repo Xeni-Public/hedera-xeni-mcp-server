@@ -19,32 +19,13 @@
 
 export type HederaNetwork = 'testnet' | 'mainnet';
 
-/**
- * Canonical public Mirror Node base URLs.
- *
- * Kept as a literal map (not derived from `client.ledgerId`) because
- * (a) the mapping is stable and publicly documented, and (b) it lets
- * this module stand alone without importing `@hiero-ledger/sdk`, which
- * keeps unit tests fast.
- */
-const MIRROR_NODE_URLS: Record<HederaNetwork, string> = {
-  testnet: 'https://testnet.mirrornode.hedera.com',
-  mainnet: 'https://mainnet-public.mirrornode.hedera.com',
-};
-
-/**
- * Return the Mirror Node base URL for a given network. Throws on unknown
- * network (defensive — `ServerConfig.network` is typed, but env parsing
- * could still produce an unexpected value if `HEDERA_NETWORK` is set to
- * something off-menu).
- */
-export function mirrorNodeBaseUrl(network: string): string {
-  const url = MIRROR_NODE_URLS[network as HederaNetwork];
-  if (!url) {
-    throw new Error(`Unknown Hedera network: "${network}". Expected "testnet" or "mainnet".`);
-  }
-  return url;
-}
+// NO DEFAULT URLs here. Mirror Node base URL is loaded from
+// HEDERA_MIRROR_NODE_URL env var by `loadConfig()` and passed down
+// as a required argument to every fetch helper below. See
+// docs/DESIGN.md §3 "External URLs — required env, fail-fast". This
+// prevents a dev-env misconfig from silently pointing a mainnet run
+// at the testnet mirror (and vice versa) — something a sensible-looking
+// default would hide.
 
 /**
  * Shape of a single crypto-allowance entry in the Mirror Node response.
@@ -72,8 +53,6 @@ export interface MirrorCryptoAllowanceResponse {
 export type FetchFn = (input: string, init?: { signal?: AbortSignal }) => Promise<Response>;
 
 export interface FetchCryptoAllowancesOptions {
-  /** Base URL (override of `mirrorNodeBaseUrl(network)`) — useful for tests. */
-  baseUrl?: string;
   /** Request timeout in ms. Default 5000. */
   timeoutMs?: number;
   /** Fetch implementation. Default: global fetch. */
@@ -87,22 +66,24 @@ export interface FetchCryptoAllowancesOptions {
  * identifying which layer failed (so an AgentService guard reading the
  * error log can tell Mirror-Node-5xx from agent-misconfiguration).
  *
- * @param network       - "testnet" or "mainnet"; selects the default base URL
+ * @param mirrorNodeUrl    - Mirror Node base URL (REQUIRED — no default).
+ *                           Loaded from `HEDERA_MIRROR_NODE_URL` at startup
+ *                           by `loadConfig()` and threaded down; see
+ *                           docs/DESIGN.md §3.
  * @param ownerAccountId   - the account that GRANTED the allowance (treasury)
  * @param spenderAccountId - the account RECEIVING the allowance (agent)
- * @param options       - overrides for baseUrl / timeout / fetch (tests)
+ * @param options          - overrides for timeout / fetch (tests)
  */
 export async function fetchCryptoAllowances(
-  network: string,
+  mirrorNodeUrl: string,
   ownerAccountId: string,
   spenderAccountId: string,
   options: FetchCryptoAllowancesOptions = {},
 ): Promise<MirrorCryptoAllowanceResponse> {
-  const baseUrl = options.baseUrl ?? mirrorNodeBaseUrl(network);
   const timeoutMs = options.timeoutMs ?? 5000;
   const fetchImpl = options.fetchImpl ?? fetch;
 
-  const url = `${baseUrl}/api/v1/accounts/${encodeURIComponent(ownerAccountId)}/allowances/crypto?spender.id=${encodeURIComponent(spenderAccountId)}`;
+  const url = `${mirrorNodeUrl}/api/v1/accounts/${encodeURIComponent(ownerAccountId)}/allowances/crypto?spender.id=${encodeURIComponent(spenderAccountId)}`;
 
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);

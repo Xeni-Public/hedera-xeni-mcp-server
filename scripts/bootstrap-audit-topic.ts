@@ -55,7 +55,7 @@
 import { pathToFileURL } from 'node:url';
 import { Client, PublicKey, TopicCreateTransaction, type TopicId } from '@hiero-ledger/sdk';
 import { loadBootstrapEnv, type BootstrapEnv } from './lib/bootstrapEnv.js';
-import { fetchAccountPublicKey, fetchTopicMemo, type HederaNetwork } from './lib/mirrorLookup.js';
+import { fetchAccountPublicKey, fetchTopicMemo } from './lib/mirrorLookup.js';
 
 /** Pure function: build the memo string for a given env label. */
 export function auditTopicMemo(envLabel: string): string {
@@ -96,10 +96,10 @@ function defaultPrintOutput(topicId: string, note: string): void {
  * calls + Hiero SDK calls; in tests, each field is a mock.
  */
 export interface BootstrapAuditTopicDeps {
-  fetchTopicMemo: (topicId: string, network: HederaNetwork) => Promise<string | null>;
+  fetchTopicMemo: (topicId: string, mirrorNodeUrl: string) => Promise<string | null>;
   fetchAccountPublicKey: (
     accountId: string,
-    network: HederaNetwork,
+    mirrorNodeUrl: string,
   ) => Promise<{ type: string; hex: string }>;
   /**
    * Create the topic. Takes the memo, admin key, and submit key and
@@ -160,7 +160,7 @@ export async function runBootstrap(
     deps.logStderr(
       `[bootstrap-audit-topic] HEDERA_XENI_AUDIT_TOPIC_ID=${input.existingTopicId} already set — verifying via Mirror Node...`,
     );
-    const foundMemo = await deps.fetchTopicMemo(input.existingTopicId, env.network);
+    const foundMemo = await deps.fetchTopicMemo(input.existingTopicId, env.mirrorNodeUrl);
     if (foundMemo !== memo) {
       throw new Error(
         `HEDERA_XENI_AUDIT_TOPIC_ID=${input.existingTopicId} exists but its memo is ${JSON.stringify(foundMemo)}, ` +
@@ -180,7 +180,7 @@ export async function runBootstrap(
   deps.logStderr(
     '[bootstrap-audit-topic] no existing topic in env; fetching agent public key for submit_key...',
   );
-  const agentKeyRecord = await deps.fetchAccountPublicKey(agentId, env.network);
+  const agentKeyRecord = await deps.fetchAccountPublicKey(agentId, env.mirrorNodeUrl);
   const agentPublicKey = parseMirrorPublicKey(agentKeyRecord.type, agentKeyRecord.hex);
   deps.logStderr(`[bootstrap-audit-topic] agent public key type=${agentKeyRecord.type}, loaded.`);
 

@@ -53,6 +53,23 @@ Mode switch (`AgentMode.AUTONOMOUS` vs `AgentMode.RETURN_BYTES`) is context-driv
 
 `HEDERA_OPERATOR_ID` is NOT loaded at runtime today, but could be in the future without breaking the invariant — the rule is about keys, not IDs.
 
+### External URLs — required env, fail-fast (no hardcoded defaults)
+
+Two external-service URLs are required at startup in every environment — dev, testnet-ci, testnet-uat, and mainnet-prod:
+
+| Env var                     | Purpose                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `HEDERA_MIRROR_NODE_URL`    | Mirror Node REST API root. Threaded into every fetch call in `src/plugins/xeniRead/` and `scripts/lib/`.      |
+| `HEDERA_HASHSCAN_BASE_URL`  | HashScan explorer root. Used for runbook log hints (e.g. the M4 re-use-path treasury link) and future UI.     |
+
+**Fail-fast rule:** if either var is missing, empty, or whitespace-only, `src/server.ts::loadConfig()` and `scripts/lib/bootstrapEnv.ts::loadBootstrapEnv()` both throw with a clear message naming the missing variable. The server + every bootstrap script refuses to start.
+
+**No hardcoded defaults anywhere in the code.** A sensible-looking default (e.g. "fall back to the testnet mirror") would mask the exact failure mode this rule exists to prevent: a mainnet-key deploy accidentally running against the testnet mirror, or vice versa. Every environment — including dev — must set these vars explicitly, so the operator thinks about which env they're in at configuration time rather than discovering it from a failed production transaction.
+
+**`.env.example` A.5** documents the canonical public values (`https://testnet.mirrornode.hedera.com`, `https://mainnet-public.mirrornode.hedera.com`, `https://hashscan.io`) as copy-paste suggestions. Private / internal mirrors or vanity explorers can be substituted without code change.
+
+**CI**: the `e2e-nightly` workflow env block (both the smoke-check step and the E2E test step) sets these explicitly — same posture as local dev.
+
 ## 4. On-chain money flow (v1, Xeni-MoR only)
 
 **Payment:** `User A → xeni_treasury` via `transfer_hbar_with_allowance`. Agent signs using User A's pre-granted allowance.

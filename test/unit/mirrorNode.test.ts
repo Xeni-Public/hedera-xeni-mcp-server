@@ -11,29 +11,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   fetchCryptoAllowances,
-  mirrorNodeBaseUrl,
   sumRemainingTinybar,
   type MirrorCryptoAllowanceResponse,
   type FetchFn,
 } from '../../src/plugins/xeniRead/mirrorNode.js';
 
-describe('mirrorNode / mirrorNodeBaseUrl', () => {
-  it('returns the canonical testnet URL', () => {
-    expect(mirrorNodeBaseUrl('testnet')).toBe('https://testnet.mirrornode.hedera.com');
-  });
-
-  it('returns the canonical mainnet URL', () => {
-    expect(mirrorNodeBaseUrl('mainnet')).toBe('https://mainnet-public.mirrornode.hedera.com');
-  });
-
-  it('throws on unknown network', () => {
-    expect(() => mirrorNodeBaseUrl('previewnet')).toThrow(/Unknown Hedera network/);
-  });
-
-  it('throws on empty string', () => {
-    expect(() => mirrorNodeBaseUrl('')).toThrow(/Unknown Hedera network/);
-  });
-});
+// Mirror Node URL is passed as an explicit argument now (no hardcoded
+// default in the module). Tests use the canonical public testnet URL
+// for readability; the override test below proves any URL works.
+const TESTNET_MIRROR = 'https://testnet.mirrornode.hedera.com';
 
 describe('mirrorNode / sumRemainingTinybar', () => {
   it('returns 0n for an empty allowances array', () => {
@@ -156,7 +142,7 @@ describe('mirrorNode / fetchCryptoAllowances', () => {
       links: { next: null },
     };
     const fetchImpl = mockFetch({ ok: true, body });
-    const res = await fetchCryptoAllowances('testnet', '0.0.1001', '0.0.1002', { fetchImpl });
+    const res = await fetchCryptoAllowances(TESTNET_MIRROR, '0.0.1001', '0.0.1002', { fetchImpl });
 
     expect(res).toEqual(body);
     // Assert fetch was called with the correct URL. The second arg (init)
@@ -174,18 +160,17 @@ describe('mirrorNode / fetchCryptoAllowances', () => {
   it('URL-encodes owner and spender IDs (defensive — account IDs are numeric but...)', async () => {
     const body = { allowances: [], links: { next: null } };
     const fetchImpl = mockFetch({ ok: true, body });
-    await fetchCryptoAllowances('testnet', '0.0/1001', '0.0?1002', { fetchImpl });
+    await fetchCryptoAllowances(TESTNET_MIRROR, '0.0/1001', '0.0?1002', { fetchImpl });
     const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(url).toContain('0.0%2F1001');
     expect(url).toContain('0.0%3F1002');
   });
 
-  it('honors a custom baseUrl override', async () => {
+  it('uses the supplied mirrorNodeUrl verbatim (proves no hardcoded default)', async () => {
     const body = { allowances: [], links: { next: null } };
     const fetchImpl = mockFetch({ ok: true, body });
-    await fetchCryptoAllowances('testnet', '0.0.1001', '0.0.1002', {
+    await fetchCryptoAllowances('https://custom.mirror.example.com', '0.0.1001', '0.0.1002', {
       fetchImpl,
-      baseUrl: 'https://custom.mirror.example.com',
     });
     const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(url).toContain('https://custom.mirror.example.com/');
@@ -194,14 +179,14 @@ describe('mirrorNode / fetchCryptoAllowances', () => {
   it('throws with HTTP status on non-2xx', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 503 });
     await expect(
-      fetchCryptoAllowances('testnet', '0.0.1001', '0.0.1002', { fetchImpl }),
+      fetchCryptoAllowances(TESTNET_MIRROR, '0.0.1001', '0.0.1002', { fetchImpl }),
     ).rejects.toThrow(/HTTP 503/);
   });
 
   it('throws with clear message on network error', async () => {
     const fetchImpl = mockFetch({ throws: new TypeError('fetch failed') });
     await expect(
-      fetchCryptoAllowances('testnet', '0.0.1001', '0.0.1002', { fetchImpl }),
+      fetchCryptoAllowances(TESTNET_MIRROR, '0.0.1001', '0.0.1002', { fetchImpl }),
     ).rejects.toThrow(/Mirror Node network error/);
   });
 
@@ -210,7 +195,7 @@ describe('mirrorNode / fetchCryptoAllowances', () => {
     abortErr.name = 'AbortError';
     const fetchImpl = mockFetch({ throws: abortErr });
     await expect(
-      fetchCryptoAllowances('testnet', '0.0.1001', '0.0.1002', { fetchImpl, timeoutMs: 10 }),
+      fetchCryptoAllowances(TESTNET_MIRROR, '0.0.1001', '0.0.1002', { fetchImpl, timeoutMs: 10 }),
     ).rejects.toThrow(/timed out after 10ms/);
   });
 
@@ -228,21 +213,21 @@ describe('mirrorNode / fetchCryptoAllowances', () => {
         }) as unknown as Response,
     );
     await expect(
-      fetchCryptoAllowances('testnet', '0.0.1001', '0.0.1002', { fetchImpl }),
+      fetchCryptoAllowances(TESTNET_MIRROR, '0.0.1001', '0.0.1002', { fetchImpl }),
     ).rejects.toThrow(/invalid JSON/);
   });
 
   it('throws with clear message when response is missing allowances array', async () => {
     const fetchImpl = mockFetch({ ok: true, body: { notAllowances: [] } });
     await expect(
-      fetchCryptoAllowances('testnet', '0.0.1001', '0.0.1002', { fetchImpl }),
+      fetchCryptoAllowances(TESTNET_MIRROR, '0.0.1001', '0.0.1002', { fetchImpl }),
     ).rejects.toThrow(/missing "allowances" array/);
   });
 
   it('throws when response is null', async () => {
     const fetchImpl = mockFetch({ ok: true, body: null });
     await expect(
-      fetchCryptoAllowances('testnet', '0.0.1001', '0.0.1002', { fetchImpl }),
+      fetchCryptoAllowances(TESTNET_MIRROR, '0.0.1001', '0.0.1002', { fetchImpl }),
     ).rejects.toThrow(/missing "allowances" array/);
   });
 
@@ -259,7 +244,7 @@ describe('mirrorNode / fetchCryptoAllowances', () => {
         }),
     );
     await expect(
-      fetchCryptoAllowances('testnet', '0.0.1001', '0.0.1002', {
+      fetchCryptoAllowances(TESTNET_MIRROR, '0.0.1001', '0.0.1002', {
         fetchImpl: slowFetch,
         timeoutMs: 50,
       }),
