@@ -227,7 +227,70 @@ For completeness — these are not ours, and we do not modify them:
 - **`Client`, `PrivateKey`, `PublicKey`, transaction builders** from `@hiero-ledger/sdk`.
 - **Hook + policy system** in `@hashgraph/hedera-agent-kit` — we do not use it in runtime post-pivot, but the spec for our previous guard architecture is in `reference-impl/`.
 
-## 6. References
+## 6. Currency conversion (HBAR ↔ fiat)
+
+User-facing prices are quoted in fiat (USD today; EUR / INR / etc. in Phase 2). Every HBAR budget / allowance / payment number is reconciled to fiat somewhere in the flow — search results display fiat, intents carry both `budget_hbar` and `max_price` USD, Slack alerts show fiat-equivalent of remaining treasury allowance. **All fiat reconciliation is dynamic and per-request** — never hardcoded, never cached beyond a single request's lifetime.
+
+### 6.1 Tool: `get_exchange_rate_tool` (upstream)
+
+Already registered on our toolkit via `allCorePlugins` (`coreMiscQueriesPlugin`). Wraps Mirror Node's `/api/v1/network/exchangerate`.
+
+- **Scope:** HBAR ↔ **USD only** — this is Hedera's own consensus-layer fee-rate, not a general FX oracle.
+- **Parameters:** `timestamp` (optional) for historical rates; omit for current.
+- **Response shape:**
+
+  ```json
+  {
+    "current_rate": {
+      "cent_equivalent": 596987,
+      "hbar_equivalent": 30000,
+      "expiration_time": 1776925010
+    },
+    "next_rate": { ... },
+    "timestamp": "1776924000.000000000"
+  }
+  ```
+
+  Type note: `cent_equivalent`, `hbar_equivalent`, and `expiration_time` are all **numbers** (with `expiration_time` in Unix seconds). `timestamp` is a **string** (Mirror Node's consensus-timestamp format `seconds.nanos`). Parse `expiration_time` as a number; parsing it as a string will yield `NaN` downstream.
+
+- **What it does NOT do:** take a fiat amount and return an HBAR amount (and vice versa). The tool returns a **rate**; the caller does the math.
+
+### 6.2 Conversion formulas
+
+Given `{cent_equivalent, hbar_equivalent}` from the tool response:
+
+```
+HBAR → USD:  usd  = hbar * (cent_equivalent / hbar_equivalent) / 100
+USD  → HBAR: hbar = usd  * (hbar_equivalent / cent_equivalent) * 100
+```
+
+Worked example with `cent_equivalent=596987`, `hbar_equivalent=30000`:
+
+- `1 HBAR  → $0.199`
+- `$50    → 251.3 HBAR`
+
+Callers should compute in the smallest unit they care about (tinybar / cents) to avoid floating-point drift on rounded intermediate values.
+
+### 6.3 Dynamic-conversion convention
+
+| Convention | Rationale |
+|---|---|
+| **Call `get_exchange_rate_tool` at the moment the conversion is needed.** Don't cache the rate beyond the life of the request. | Mirror Node updates the consensus rate approximately every 15 minutes. Caching risks quoting a stale price at commit time, especially on long-running booking flows. |
+| **Never hardcode a rate.** | Same reason. Also protects against test-env drift. |
+| **Store both sides when persisting.** | Audit events, intent rows, HCS envelopes SHOULD carry both the HBAR amount and the USD-equivalent AT TX TIME. The rate at audit replay time will differ; storing both values is cheap and makes post-hoc reconciliation deterministic. |
+| **Fail fast on zero / negative components.** | A `cent_equivalent` or `hbar_equivalent` of 0 means Mirror Node returned garbage — surface this rather than compute a `NaN` or `Infinity` downstream. |
+
+**Known transitional exception (2026-04-23):** AgentService's forward-payment (`services/intentService/payment_outcome.go`) + refund (`approveService.go`) paths currently use a static config-rate (`coingecko.static_hbar_rate`) set at service start, not a per-request `get_exchange_rate_tool` call. Migration tracked in [ai-agent-api-service #90](https://github.com/xeni-app/ai-agent-api-service/issues/90). Until that lands, live code on those two paths diverges from the convention above — any **new** code or flow should still follow the dynamic-per-request rule.
+
+### 6.4 Multi-currency gap (Phase 2)
+
+Mirror Node only serves HBAR/USD. For **EUR, INR, GBP, or any other fiat**, we'd need an external oracle — CoinGecko (primary candidate), or equivalent. Not shipped in v1.
+
+Candidate Xeni-owned tool when the need arises: `get_hbar_fiat_rate` wrapping CoinGecko's `/simple/price?ids=hedera-hashgraph&vs_currencies=...`, with the same "dynamic per-request + fail-fast" posture as `get_treasury_allowance_remaining`.
+
+Until then, **anything that needs non-USD fiat must be converted outside this MCP** (usually on the frontend or AgentService via its own FX helper), and the result passed into MCP calls as already-converted HBAR amounts.
+
+## 7. References
 
 - [DESIGN.md](DESIGN.md) — full architectural rationale
 - [DESIGN_DEPENDENCIES.md](DESIGN_DEPENDENCIES.md) — upstream dependencies
