@@ -8,7 +8,11 @@
  *   - fetchAccountMemo (M4 idempotency verification)
  *   - fetchAccountPublicKey (M3 agent-public-key lookup for submit_key)
  *
- * Plus the network-URL + error-path behaviors shared by all three.
+ * Plus error-path behaviors shared by all three.
+ *
+ * Mirror Node URL is passed explicitly as an argument (no hardcoded
+ * default in the module anymore — see docs/DESIGN.md §3). Tests use a
+ * canonical testnet URL constant for readability.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -16,9 +20,10 @@ import {
   fetchAccountMemo,
   fetchAccountPublicKey,
   fetchTopicMemo,
-  mirrorNodeBaseUrl,
   type FetchFn,
 } from '../../scripts/lib/mirrorLookup.js';
+
+const TESTNET_MIRROR = 'https://testnet.mirrornode.hedera.com';
 
 function mockFetch(response: {
   ok?: boolean;
@@ -38,45 +43,37 @@ function mockFetch(response: {
   });
 }
 
-describe('mirrorLookup / mirrorNodeBaseUrl', () => {
-  it('returns the canonical testnet URL', () => {
-    expect(mirrorNodeBaseUrl('testnet')).toBe('https://testnet.mirrornode.hedera.com');
-  });
-
-  it('returns the canonical mainnet URL', () => {
-    expect(mirrorNodeBaseUrl('mainnet')).toBe('https://mainnet-public.mirrornode.hedera.com');
-  });
-});
-
 describe('mirrorLookup / fetchTopicMemo', () => {
   it('returns the memo string on happy path', async () => {
     const fetchImpl = mockFetch({
       body: { topic_id: '0.0.8719397', memo: 'xeni_audit_v1_testnet-ci' },
     });
-    const memo = await fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl });
+    const memo = await fetchTopicMemo('0.0.8719397', TESTNET_MIRROR, { fetchImpl });
     expect(memo).toBe('xeni_audit_v1_testnet-ci');
   });
 
   it('returns null when the topic has no memo (empty or missing field)', async () => {
     const fetchImpl = mockFetch({ body: { topic_id: '0.0.8719397' } });
-    const memo = await fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl });
+    const memo = await fetchTopicMemo('0.0.8719397', TESTNET_MIRROR, { fetchImpl });
     expect(memo).toBeNull();
   });
 
   it('returns empty string when memo is explicitly empty', async () => {
     const fetchImpl = mockFetch({ body: { topic_id: '0.0.8719397', memo: '' } });
-    const memo = await fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl });
+    const memo = await fetchTopicMemo('0.0.8719397', TESTNET_MIRROR, { fetchImpl });
     expect(memo).toBe('');
   });
 
   it('throws on HTTP 404 (topic not found)', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 404 });
-    await expect(fetchTopicMemo('0.0.9999', 'testnet', { fetchImpl })).rejects.toThrow(/HTTP 404/);
+    await expect(fetchTopicMemo('0.0.9999', TESTNET_MIRROR, { fetchImpl })).rejects.toThrow(
+      /HTTP 404/,
+    );
   });
 
   it('throws on general network error (no Mirror Node reachable)', async () => {
     const fetchImpl = mockFetch({ throws: new TypeError('fetch failed') });
-    await expect(fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl })).rejects.toThrow(
+    await expect(fetchTopicMemo('0.0.8719397', TESTNET_MIRROR, { fetchImpl })).rejects.toThrow(
       /network error/,
     );
   });
@@ -86,7 +83,7 @@ describe('mirrorLookup / fetchTopicMemo', () => {
     abortErr.name = 'AbortError';
     const fetchImpl = mockFetch({ throws: abortErr });
     await expect(
-      fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl, timeoutMs: 10 }),
+      fetchTopicMemo('0.0.8719397', TESTNET_MIRROR, { fetchImpl, timeoutMs: 10 }),
     ).rejects.toThrow(/timed out after 10ms/);
   });
 
@@ -101,14 +98,14 @@ describe('mirrorLookup / fetchTopicMemo', () => {
           json: async () => 'string-not-object',
         }) as unknown as Response,
     );
-    await expect(fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl })).rejects.toThrow(
+    await expect(fetchTopicMemo('0.0.8719397', TESTNET_MIRROR, { fetchImpl })).rejects.toThrow(
       /non-object body/,
     );
   });
 
   it('URL-encodes the topic ID in the path', async () => {
     const fetchImpl = mockFetch({ body: { topic_id: '0.0/8719397', memo: 'x' } });
-    await fetchTopicMemo('0.0/8719397', 'testnet', { fetchImpl });
+    await fetchTopicMemo('0.0/8719397', TESTNET_MIRROR, { fetchImpl });
     const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(url).toContain('0.0%2F8719397');
   });
@@ -118,9 +115,17 @@ describe('mirrorLookup / fetchTopicMemo', () => {
     // (/api/v1/topics?account.id=...). Lock the correct endpoint shape in so
     // a future refactor can't silently regress back to a list endpoint.
     const fetchImpl = mockFetch({ body: { topic_id: '0.0.8719397', memo: 'm' } });
-    await fetchTopicMemo('0.0.8719397', 'testnet', { fetchImpl });
+    await fetchTopicMemo('0.0.8719397', TESTNET_MIRROR, { fetchImpl });
     const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(url).toBe('https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.8719397');
+  });
+
+  it('uses the supplied mirrorNodeUrl verbatim (no internal URL construction)', async () => {
+    // Proves the URL comes from the caller, not a hardcoded default.
+    const fetchImpl = mockFetch({ body: { topic_id: '0.0.1', memo: 'm' } });
+    await fetchTopicMemo('0.0.1', 'https://custom.mirror.example.com', { fetchImpl });
+    const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    expect(url).toBe('https://custom.mirror.example.com/api/v1/topics/0.0.1');
   });
 });
 
@@ -135,7 +140,7 @@ describe('mirrorLookup / fetchAccountPublicKey', () => {
         },
       },
     });
-    const result = await fetchAccountPublicKey('0.0.1002', 'testnet', { fetchImpl });
+    const result = await fetchAccountPublicKey('0.0.1002', TESTNET_MIRROR, { fetchImpl });
     expect(result.type).toBe('ECDSA_SECP256K1');
     expect(result.hex).toBe('0340e0dd09b1e5e8f1c4f2e7c5d0f3b4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1');
   });
@@ -144,14 +149,14 @@ describe('mirrorLookup / fetchAccountPublicKey', () => {
     const fetchImpl = mockFetch({
       body: { account: '0.0.1002', key: null },
     });
-    await expect(fetchAccountPublicKey('0.0.1002', 'testnet', { fetchImpl })).rejects.toThrow(
+    await expect(fetchAccountPublicKey('0.0.1002', TESTNET_MIRROR, { fetchImpl })).rejects.toThrow(
       /no single-key/,
     );
   });
 
   it('throws on HTTP non-2xx', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 404 });
-    await expect(fetchAccountPublicKey('0.0.9999', 'testnet', { fetchImpl })).rejects.toThrow(
+    await expect(fetchAccountPublicKey('0.0.9999', TESTNET_MIRROR, { fetchImpl })).rejects.toThrow(
       /HTTP 404/,
     );
   });
@@ -161,13 +166,13 @@ describe('mirrorLookup / fetchAccountPublicKey', () => {
     abortErr.name = 'AbortError';
     const fetchImpl = mockFetch({ throws: abortErr });
     await expect(
-      fetchAccountPublicKey('0.0.1002', 'testnet', { fetchImpl, timeoutMs: 10 }),
+      fetchAccountPublicKey('0.0.1002', TESTNET_MIRROR, { fetchImpl, timeoutMs: 10 }),
     ).rejects.toThrow(/timed out after 10ms/);
   });
 
   it('throws on general network error', async () => {
     const fetchImpl = mockFetch({ throws: new TypeError('fetch failed') });
-    await expect(fetchAccountPublicKey('0.0.1002', 'testnet', { fetchImpl })).rejects.toThrow(
+    await expect(fetchAccountPublicKey('0.0.1002', TESTNET_MIRROR, { fetchImpl })).rejects.toThrow(
       /network error/,
     );
   });
@@ -176,7 +181,7 @@ describe('mirrorLookup / fetchAccountPublicKey', () => {
     const fetchImpl = mockFetch({
       body: { key: { _type: 'ECDSA_SECP256K1', key: 'deadbeef' } },
     });
-    await fetchAccountPublicKey('0.0/1002', 'testnet', { fetchImpl });
+    await fetchAccountPublicKey('0.0/1002', TESTNET_MIRROR, { fetchImpl });
     const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(url).toContain('0.0%2F1002');
   });
@@ -187,25 +192,25 @@ describe('mirrorLookup / fetchAccountMemo', () => {
     const fetchImpl = mockFetch({
       body: { account: '0.0.2001', memo: 'xeni_treasury_v1_testnet-uat' },
     });
-    const memo = await fetchAccountMemo('0.0.2001', 'testnet', { fetchImpl });
+    const memo = await fetchAccountMemo('0.0.2001', TESTNET_MIRROR, { fetchImpl });
     expect(memo).toBe('xeni_treasury_v1_testnet-uat');
   });
 
   it('returns null when the account has no memo (empty or missing field)', async () => {
     const fetchImpl = mockFetch({ body: { account: '0.0.2001' } });
-    const memo = await fetchAccountMemo('0.0.2001', 'testnet', { fetchImpl });
+    const memo = await fetchAccountMemo('0.0.2001', TESTNET_MIRROR, { fetchImpl });
     expect(memo).toBeNull();
   });
 
   it('returns empty string when memo is explicitly empty', async () => {
     const fetchImpl = mockFetch({ body: { account: '0.0.2001', memo: '' } });
-    const memo = await fetchAccountMemo('0.0.2001', 'testnet', { fetchImpl });
+    const memo = await fetchAccountMemo('0.0.2001', TESTNET_MIRROR, { fetchImpl });
     expect(memo).toBe('');
   });
 
   it('throws on HTTP 404 (account not found)', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 404 });
-    await expect(fetchAccountMemo('0.0.9999', 'testnet', { fetchImpl })).rejects.toThrow(
+    await expect(fetchAccountMemo('0.0.9999', TESTNET_MIRROR, { fetchImpl })).rejects.toThrow(
       /HTTP 404/,
     );
   });
@@ -221,14 +226,14 @@ describe('mirrorLookup / fetchAccountMemo', () => {
           json: async () => 'string-not-object',
         }) as unknown as Response,
     );
-    await expect(fetchAccountMemo('0.0.2001', 'testnet', { fetchImpl })).rejects.toThrow(
+    await expect(fetchAccountMemo('0.0.2001', TESTNET_MIRROR, { fetchImpl })).rejects.toThrow(
       /non-object body/,
     );
   });
 
   it('URL-encodes the account ID in the path', async () => {
     const fetchImpl = mockFetch({ body: { account: '0.0/2001', memo: 'x' } });
-    await fetchAccountMemo('0.0/2001', 'testnet', { fetchImpl });
+    await fetchAccountMemo('0.0/2001', TESTNET_MIRROR, { fetchImpl });
     const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(url).toContain('0.0%2F2001');
   });

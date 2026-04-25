@@ -6,6 +6,9 @@
  * Uses a mock `fetchImpl` injected via `deps.fetchImpl`. No network I/O.
  * Asserts the full tool contract: method name, description, input schema,
  * and the execute-path return shape + humanMessage.
+ *
+ * `mirrorNodeUrl` is supplied explicitly on deps (no hardcoded default
+ * anywhere in the module — see docs/DESIGN.md §3).
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -16,6 +19,8 @@ import {
   type GetTreasuryAllowanceRemainingResult,
 } from '../../src/plugins/xeniRead/getTreasuryAllowanceRemaining.js';
 import type { FetchFn } from '../../src/plugins/xeniRead/mirrorNode.js';
+
+const TESTNET_MIRROR = 'https://testnet.mirrornode.hedera.com';
 
 function mockFetchReturning(body: unknown, ok = true, status = 200): FetchFn {
   return vi.fn(
@@ -30,18 +35,11 @@ function mockFetchReturning(body: unknown, ok = true, status = 200): FetchFn {
   );
 }
 
-/**
- * Type-safe cast of the `execute` return — the `Tool.execute` signature
- * upstream is `Promise<any>`, so we narrow here so individual tests don't
- * each need their own cast.
- */
 type ExecResult = {
   raw: GetTreasuryAllowanceRemainingResult;
   humanMessage: string;
 };
 
-// A dummy `Client` cast — the tool doesn't touch the client for Mirror
-// Node reads, so `{} as Client` is safe.
 const DUMMY_CLIENT = {} as Client;
 const DUMMY_CONTEXT = { accountId: '0.0.1002' };
 
@@ -50,6 +48,7 @@ describe('getTreasuryAllowanceRemaining / tool metadata', () => {
     treasuryAccountId: '0.0.1001',
     agentAccountId: '0.0.1002',
     network: 'testnet',
+    mirrorNodeUrl: TESTNET_MIRROR,
   });
 
   it('exposes the canonical method name', () => {
@@ -89,6 +88,7 @@ describe('getTreasuryAllowanceRemaining / execute', () => {
       treasuryAccountId: '0.0.1001',
       agentAccountId: '0.0.1002',
       network: 'testnet',
+      mirrorNodeUrl: TESTNET_MIRROR,
       fetchImpl,
     });
     const result = (await tool.execute(DUMMY_CLIENT, DUMMY_CONTEXT, {})) as ExecResult;
@@ -114,6 +114,7 @@ describe('getTreasuryAllowanceRemaining / execute', () => {
       treasuryAccountId: '0.0.1001',
       agentAccountId: '0.0.1002',
       network: 'testnet',
+      mirrorNodeUrl: TESTNET_MIRROR,
       fetchImpl,
     });
     const result = (await tool.execute(DUMMY_CLIENT, DUMMY_CONTEXT, {})) as ExecResult;
@@ -123,7 +124,6 @@ describe('getTreasuryAllowanceRemaining / execute', () => {
   it('sums across multiple allowance rows and converts', async () => {
     const fetchImpl = mockFetchReturning({
       allowances: [
-        // 500_000_000 tinybar = 5 HBAR
         {
           amount: 500_000_000,
           amount_granted: 1_000_000_000,
@@ -131,7 +131,6 @@ describe('getTreasuryAllowanceRemaining / execute', () => {
           spender: '0.0.1002',
           timestamp: { from: '1', to: null },
         },
-        // 250_000_000 tinybar = 2.5 HBAR
         {
           amount: 250_000_000,
           amount_granted: 500_000_000,
@@ -146,6 +145,7 @@ describe('getTreasuryAllowanceRemaining / execute', () => {
       treasuryAccountId: '0.0.1001',
       agentAccountId: '0.0.1002',
       network: 'testnet',
+      mirrorNodeUrl: TESTNET_MIRROR,
       fetchImpl,
     });
     const result = (await tool.execute(DUMMY_CLIENT, DUMMY_CONTEXT, {})) as ExecResult;
@@ -169,6 +169,7 @@ describe('getTreasuryAllowanceRemaining / execute', () => {
       treasuryAccountId: '0.0.1001',
       agentAccountId: '0.0.1002',
       network: 'testnet',
+      mirrorNodeUrl: TESTNET_MIRROR,
       fetchImpl,
     });
     const result = (await tool.execute(DUMMY_CLIENT, DUMMY_CONTEXT, {})) as ExecResult;
@@ -184,32 +185,22 @@ describe('getTreasuryAllowanceRemaining / execute', () => {
       treasuryAccountId: '0.0.1001',
       agentAccountId: '0.0.1002',
       network: 'testnet',
+      mirrorNodeUrl: TESTNET_MIRROR,
       fetchImpl,
     });
     await expect(tool.execute(DUMMY_CLIENT, DUMMY_CONTEXT, {})).rejects.toThrow(/HTTP 503/);
   });
 
-  it('propagates "unknown network" error when network is malformed', async () => {
-    const tool = makeGetTreasuryAllowanceRemainingTool({
-      treasuryAccountId: '0.0.1001',
-      agentAccountId: '0.0.1002',
-      network: 'previewnet', // not supported
-    });
-    await expect(tool.execute(DUMMY_CLIENT, DUMMY_CONTEXT, {})).rejects.toThrow(
-      /Unknown Hedera network/,
-    );
-  });
-
-  it('honors custom timeoutMs + baseUrl (proves options bag wires through)', async () => {
+  it('uses the supplied mirrorNodeUrl verbatim (proves no hardcoded default)', async () => {
     const body = { allowances: [], links: { next: null } };
     const fetchImpl = mockFetchReturning(body);
     const tool = makeGetTreasuryAllowanceRemainingTool({
       treasuryAccountId: '0.0.1001',
       agentAccountId: '0.0.1002',
       network: 'testnet',
+      mirrorNodeUrl: 'https://mirror-override.example.com',
       fetchImpl,
       timeoutMs: 1000,
-      baseUrl: 'https://mirror-override.example.com',
     });
     await tool.execute(DUMMY_CLIENT, DUMMY_CONTEXT, {});
     const url = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;

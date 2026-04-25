@@ -26,6 +26,27 @@ export interface ServerConfig {
   httpPort: number;
   nodeEnv: 'development' | 'test' | 'production';
   envLabel: string;
+  /** Mirror Node base URL — required at startup; no hardcoded default. */
+  mirrorNodeUrl: string;
+  /** HashScan explorer root — required at startup; no hardcoded default. */
+  hashscanBaseUrl: string;
+}
+
+/**
+ * Fail-loud env-var read. Throws with a clear message pointing at
+ * `.env.example` so ops sees the specific missing variable rather than
+ * falling back to a silent default that could mask a dev-vs-prod
+ * misconfig. See docs/DESIGN.md §3 "External URLs — required env,
+ * fail-fast" for why there are no defaults on the URL vars.
+ */
+function requireRuntimeEnv(name: string): string {
+  const val = process.env[name];
+  if (!val || val.trim() === '') {
+    throw new Error(
+      `Required env var missing: ${name}. See .env.example SECTION A for runtime-required vars.`,
+    );
+  }
+  return val.trim();
 }
 
 export function loadConfig(): ServerConfig {
@@ -45,6 +66,11 @@ export function loadConfig(): ServerConfig {
     httpPort: Number(process.env['HEDERA_HTTP_PORT'] ?? '7701'),
     nodeEnv,
     envLabel: process.env['HEDERA_ENV_LABEL'] ?? 'dev',
+    // Both URLs are REQUIRED at startup in every env (dev, testnet-ci,
+    // testnet-uat, mainnet-prod). There's no hardcoded default — a
+    // sensible-looking default would let a dev-vs-prod env mismatch hide.
+    mirrorNodeUrl: requireRuntimeEnv('HEDERA_MIRROR_NODE_URL'),
+    hashscanBaseUrl: requireRuntimeEnv('HEDERA_HASHSCAN_BASE_URL'),
   };
 }
 
@@ -91,6 +117,7 @@ export function buildToolkit(config: ServerConfig): HederaMCPToolkit {
         treasuryAccountId,
         agentAccountId: agent.accountId,
         network: config.network,
+        mirrorNodeUrl: config.mirrorNodeUrl,
       },
     }),
   ];

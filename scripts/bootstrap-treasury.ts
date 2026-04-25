@@ -67,7 +67,7 @@ import {
   type AccountId,
 } from '@hiero-ledger/sdk';
 import { loadBootstrapEnv, type BootstrapEnv } from './lib/bootstrapEnv.js';
-import { fetchAccountMemo, type HederaNetwork } from './lib/mirrorLookup.js';
+import { fetchAccountMemo } from './lib/mirrorLookup.js';
 
 /** Pure: canonical memo for a treasury account, doubles as a validity check on re-run. */
 export function treasuryMemo(envLabel: string): string {
@@ -95,7 +95,7 @@ export function parseHbarEnv(envName: string, defaultHbar: number): number {
  * Mirror Node / Hiero SDK in `main()` below.
  */
 export interface BootstrapTreasuryDeps {
-  fetchAccountMemo: (accountId: string, network: HederaNetwork) => Promise<string | null>;
+  fetchAccountMemo: (accountId: string, mirrorNodeUrl: string) => Promise<string | null>;
   createTreasury: (args: {
     env: BootstrapEnv;
     memo: string;
@@ -161,7 +161,10 @@ export async function runBootstrap(
     deps.logStderr(
       `[bootstrap-treasury] HEDERA_XENI_TREASURY_ID=${input.existingTreasuryId} already set — verifying via Mirror Node...`,
     );
-    const foundMemo = await deps.fetchAccountMemo(input.existingTreasuryId, input.env.network);
+    const foundMemo = await deps.fetchAccountMemo(
+      input.existingTreasuryId,
+      input.env.mirrorNodeUrl,
+    );
     if (foundMemo !== memo) {
       throw new Error(
         `HEDERA_XENI_TREASURY_ID=${input.existingTreasuryId} exists but its memo is ${JSON.stringify(foundMemo)}, ` +
@@ -182,7 +185,7 @@ export async function runBootstrap(
       `#        running MCP server for this env — returns { remainingHbar: number }`,
     );
     deps.printStdout(
-      `#   HashScan: https://hashscan.io/${input.env.network}/account/${input.existingTreasuryId}`,
+      `#   HashScan: ${input.env.hashscanBaseUrl}/${input.env.network}/account/${input.existingTreasuryId}`,
     );
     deps.printStdout(`#            → Allowances tab → filter spender=<agent>`);
     deps.printStdout(`# For top-up procedure, see docs/RUNBOOKS.md § "Treasury replenishment".`);

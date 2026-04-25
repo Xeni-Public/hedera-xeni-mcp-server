@@ -224,7 +224,7 @@ describe('shape assertions', () => {
 
 describe('buildProbes', () => {
   const inputs = {
-    network: 'testnet' as const,
+    mirrorNodeUrl: 'https://testnet.mirrornode.hedera.com',
     topicId: '0.0.8719397',
     agentAccountId: '0.0.8666031',
     treasuryAccountId: '0.0.8719505',
@@ -241,7 +241,7 @@ describe('buildProbes', () => {
     ]);
   });
 
-  it('builds the topic URL against the testnet Mirror Node host', () => {
+  it('builds the topic URL against the supplied Mirror Node host', () => {
     const probes = buildProbes(inputs);
     expect(probes[0]?.url).toBe('https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.8719397');
   });
@@ -267,8 +267,11 @@ describe('buildProbes', () => {
     );
   });
 
-  it('uses the mainnet Mirror Node host when network=mainnet', () => {
-    const probes = buildProbes({ ...inputs, network: 'mainnet' });
+  it('uses the supplied mirrorNodeUrl verbatim (proves no hardcoded default)', () => {
+    const probes = buildProbes({
+      ...inputs,
+      mirrorNodeUrl: 'https://mainnet-public.mirrornode.hedera.com',
+    });
     expect(probes[0]?.url.startsWith('https://mainnet-public.mirrornode.hedera.com/')).toBe(true);
   });
 

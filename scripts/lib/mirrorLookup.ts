@@ -31,14 +31,12 @@
 
 export type HederaNetwork = 'testnet' | 'mainnet';
 
-const MIRROR_NODE_URLS: Record<HederaNetwork, string> = {
-  testnet: 'https://testnet.mirrornode.hedera.com',
-  mainnet: 'https://mainnet-public.mirrornode.hedera.com',
-};
-
-export function mirrorNodeBaseUrl(network: HederaNetwork): string {
-  return MIRROR_NODE_URLS[network];
-}
+// NO DEFAULT URLs here. Mirror Node base URL is loaded from
+// HEDERA_MIRROR_NODE_URL env var by `loadBootstrapEnv()` and passed down
+// as a required argument to every fetch helper below. See docs/DESIGN.md
+// §3 "External URLs — required env, fail-fast". This prevents a dev-env
+// misconfig from silently pointing a mainnet run at the testnet mirror
+// (and vice versa) — something a sensible-looking default would hide.
 
 /** Dependency-injected `fetch`. Tests pass a mock; prod uses global. */
 export type FetchFn = (input: string, init?: { signal?: AbortSignal }) => Promise<Response>;
@@ -46,8 +44,6 @@ export type FetchFn = (input: string, init?: { signal?: AbortSignal }) => Promis
 interface LookupOptions {
   timeoutMs?: number;
   fetchImpl?: FetchFn;
-  /** Optional base URL override (tests); defaults to network-derived URL. */
-  baseUrl?: string;
 }
 
 /**
@@ -114,11 +110,10 @@ interface MirrorTopicInfo {
  */
 export async function fetchTopicMemo(
   topicId: string,
-  network: HederaNetwork,
+  mirrorNodeUrl: string,
   options: LookupOptions = {},
 ): Promise<string | null> {
-  const baseUrl = options.baseUrl ?? mirrorNodeBaseUrl(network);
-  const url = `${baseUrl}/api/v1/topics/${encodeURIComponent(topicId)}`;
+  const url = `${mirrorNodeUrl}/api/v1/topics/${encodeURIComponent(topicId)}`;
   const body = (await fetchJson(url, options)) as MirrorTopicInfo;
 
   if (!body || typeof body !== 'object') {
@@ -150,11 +145,10 @@ interface MirrorAccountInfo {
  */
 export async function fetchAccountMemo(
   accountId: string,
-  network: HederaNetwork,
+  mirrorNodeUrl: string,
   options: LookupOptions = {},
 ): Promise<string | null> {
-  const baseUrl = options.baseUrl ?? mirrorNodeBaseUrl(network);
-  const url = `${baseUrl}/api/v1/accounts/${encodeURIComponent(accountId)}`;
+  const url = `${mirrorNodeUrl}/api/v1/accounts/${encodeURIComponent(accountId)}`;
   const body = (await fetchJson(url, options)) as MirrorAccountInfo;
 
   if (!body || typeof body !== 'object') {
@@ -173,11 +167,10 @@ export async function fetchAccountMemo(
  */
 export async function fetchAccountPublicKey(
   accountId: string,
-  network: HederaNetwork,
+  mirrorNodeUrl: string,
   options: LookupOptions = {},
 ): Promise<{ type: string; hex: string }> {
-  const baseUrl = options.baseUrl ?? mirrorNodeBaseUrl(network);
-  const url = `${baseUrl}/api/v1/accounts/${encodeURIComponent(accountId)}`;
+  const url = `${mirrorNodeUrl}/api/v1/accounts/${encodeURIComponent(accountId)}`;
   const body = (await fetchJson(url, options)) as MirrorAccountInfo;
 
   if (!body || typeof body !== 'object') {

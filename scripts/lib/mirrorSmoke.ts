@@ -20,7 +20,9 @@
  * All IO (fetch, sleep) is injected so unit tests don't touch the network.
  */
 
-import { mirrorNodeBaseUrl, type HederaNetwork } from './mirrorLookup.js';
+// Mirror Node base URL is provided by the caller — loaded from
+// HEDERA_MIRROR_NODE_URL by smoke-mirror-node.ts's main(). No default
+// lookup here. See docs/DESIGN.md §3.
 
 /** Shape-invariant assertion — throws with a short reason on mismatch. */
 export type ShapeAssertion = (body: unknown) => void;
@@ -158,7 +160,11 @@ export function assertMessagesShape(body: unknown): void {
 // ----- Probe set builder -----
 
 export interface BuildProbesInput {
-  network: HederaNetwork;
+  /**
+   * Mirror Node base URL (REQUIRED — no default). Threaded down from
+   * `HEDERA_MIRROR_NODE_URL` via `smoke-mirror-node.ts::main()`.
+   */
+  mirrorNodeUrl: string;
   /** Existing testnet-ci topic ID — used for endpoints #1 and #4. */
   topicId: string;
   /** Existing agent account ID — used as spender for #2 and #3. */
@@ -173,7 +179,7 @@ export interface BuildProbesInput {
  * on failure, not for correctness (each probe is independent).
  */
 export function buildProbes(input: BuildProbesInput): EndpointProbe[] {
-  const base = mirrorNodeBaseUrl(input.network);
+  const base = input.mirrorNodeUrl;
   const topic = encodeURIComponent(input.topicId);
   const agent = encodeURIComponent(input.agentAccountId);
   const treasury = encodeURIComponent(input.treasuryAccountId);

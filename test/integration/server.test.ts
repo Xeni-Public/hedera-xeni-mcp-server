@@ -39,6 +39,11 @@ function setValidBuildEnv(): { agent: { id: string; key: string } } {
   process.env['HEDERA_AGENT_ID'] = agent.id;
   process.env['HEDERA_AGENT_KEY'] = agent.key;
   process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+  // Both URLs are required by loadConfig() (fail-fast, no defaults).
+  // Test fixtures supply the canonical public values so the server builds
+  // without relying on any hardcoded fallback in the code.
+  process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+  process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
   return { agent };
 }
 
@@ -63,6 +68,8 @@ describe('server / buildToolkit', () => {
   it('throws when HEDERA_AGENT_ID is missing', () => {
     process.env['HEDERA_AGENT_KEY'] = generateAgentEnv().key;
     process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     const config = loadConfig();
     expect(() => buildToolkit(config)).toThrow(/HEDERA_AGENT_ID/);
   });
@@ -70,6 +77,8 @@ describe('server / buildToolkit', () => {
   it('throws when HEDERA_AGENT_KEY is missing', () => {
     process.env['HEDERA_AGENT_ID'] = generateAgentEnv().id;
     process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     const config = loadConfig();
     expect(() => buildToolkit(config)).toThrow(/HEDERA_AGENT_KEY/);
   });
@@ -78,6 +87,8 @@ describe('server / buildToolkit', () => {
     process.env['HEDERA_AGENT_ID'] = generateAgentEnv().id;
     process.env['HEDERA_AGENT_KEY'] = 'not-a-hex-key';
     process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     const config = loadConfig();
     expect(() => buildToolkit(config)).toThrow();
   });
@@ -86,9 +97,41 @@ describe('server / buildToolkit', () => {
     const agent = generateAgentEnv();
     process.env['HEDERA_AGENT_ID'] = agent.id;
     process.env['HEDERA_AGENT_KEY'] = agent.key;
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     // HEDERA_XENI_TREASURY_ID intentionally omitted
     const config = loadConfig();
     expect(() => buildToolkit(config)).toThrow(/HEDERA_XENI_TREASURY_ID/);
+  });
+
+  it('loadConfig throws when HEDERA_MIRROR_NODE_URL is missing (fail-fast, no default)', () => {
+    const agent = generateAgentEnv();
+    process.env['HEDERA_AGENT_ID'] = agent.id;
+    process.env['HEDERA_AGENT_KEY'] = agent.key;
+    process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
+    // HEDERA_MIRROR_NODE_URL intentionally omitted
+    expect(() => loadConfig()).toThrow(/HEDERA_MIRROR_NODE_URL/);
+  });
+
+  it('loadConfig throws when HEDERA_HASHSCAN_BASE_URL is missing (fail-fast, no default)', () => {
+    const agent = generateAgentEnv();
+    process.env['HEDERA_AGENT_ID'] = agent.id;
+    process.env['HEDERA_AGENT_KEY'] = agent.key;
+    process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    // HEDERA_HASHSCAN_BASE_URL intentionally omitted
+    expect(() => loadConfig()).toThrow(/HEDERA_HASHSCAN_BASE_URL/);
+  });
+
+  it('loadConfig throws when HEDERA_MIRROR_NODE_URL is whitespace-only (fail-fast on blank)', () => {
+    const agent = generateAgentEnv();
+    process.env['HEDERA_AGENT_ID'] = agent.id;
+    process.env['HEDERA_AGENT_KEY'] = agent.key;
+    process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = '   ';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
+    expect(() => loadConfig()).toThrow(/HEDERA_MIRROR_NODE_URL/);
   });
 
   it('returns a HederaMCPToolkit instance with valid agent + treasury env', () => {
@@ -122,6 +165,8 @@ describe('server / buildToolkit', () => {
   });
 
   it('reads HEDERA_ENV_LABEL from env (defaults to dev)', () => {
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     process.env['HEDERA_ENV_LABEL'] = 'testnet-uat';
     const config = loadConfig();
     expect(config.envLabel).toBe('testnet-uat');
@@ -131,6 +176,8 @@ describe('server / buildToolkit', () => {
   });
 
   it('defaults HTTP bind to 127.0.0.1 (loopback-only)', () => {
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     const config = loadConfig();
     expect(config.httpBind).toBe('127.0.0.1');
   });

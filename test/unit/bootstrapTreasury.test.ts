@@ -92,6 +92,8 @@ describe('bootstrap-treasury / runBootstrap', () => {
       operatorKey: PrivateKey.generateECDSA(),
       network: 'testnet',
       envLabel: 'dev',
+      mirrorNodeUrl: 'https://testnet.mirrornode.hedera.com',
+      hashscanBaseUrl: 'https://hashscan.io',
     };
   }
 

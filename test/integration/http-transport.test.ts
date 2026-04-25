@@ -82,6 +82,8 @@ describe('http transport / startHttpServer', () => {
     process.env['HEDERA_AGENT_ID'] = agent.id;
     process.env['HEDERA_AGENT_KEY'] = agent.key;
     process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     process.env['HEDERA_HTTP_BIND'] = '0.0.0.0';
     process.env['HEDERA_HTTP_PORT'] = '0';
 
@@ -94,6 +96,8 @@ describe('http transport / startHttpServer', () => {
     process.env['HEDERA_AGENT_ID'] = agent.id;
     process.env['HEDERA_AGENT_KEY'] = agent.key;
     process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     process.env['HEDERA_HTTP_BIND'] = '127.0.0.1';
     process.env['HEDERA_HTTP_PORT'] = '0'; // OS picks a free port
 
@@ -109,6 +113,8 @@ describe('http transport / startHttpServer', () => {
     process.env['HEDERA_AGENT_ID'] = agent.id;
     process.env['HEDERA_AGENT_KEY'] = agent.key;
     process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     process.env['HEDERA_HTTP_BIND'] = '127.0.0.1';
     process.env['HEDERA_HTTP_PORT'] = '0';
 
@@ -135,6 +141,8 @@ describe('http transport / startHttpServer', () => {
     process.env['HEDERA_AGENT_ID'] = agent.id;
     process.env['HEDERA_AGENT_KEY'] = agent.key;
     process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     process.env['HEDERA_HTTP_BIND'] = '127.0.0.1';
     process.env['HEDERA_HTTP_PORT'] = '0';
 
@@ -166,6 +174,8 @@ describe('http transport / startHttpServer', () => {
     process.env['HEDERA_AGENT_ID'] = agent.id;
     process.env['HEDERA_AGENT_KEY'] = agent.key;
     process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     process.env['HEDERA_HTTP_BIND'] = '127.0.0.1';
     process.env['HEDERA_HTTP_PORT'] = '0';
 
@@ -192,6 +202,9 @@ describe('http transport / startHttpServer', () => {
     const agent = generateAgentEnv();
     process.env['HEDERA_AGENT_ID'] = agent.id;
     process.env['HEDERA_AGENT_KEY'] = agent.key;
+    process.env['HEDERA_XENI_TREASURY_ID'] = '0.0.7654321';
+    process.env['HEDERA_MIRROR_NODE_URL'] = 'https://testnet.mirrornode.hedera.com';
+    process.env['HEDERA_HASHSCAN_BASE_URL'] = 'https://hashscan.io';
     process.env['NODE_ENV'] = 'production';
     process.env['HEDERA_TRANSPORT'] = 'http';
 

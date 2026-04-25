@@ -32,24 +32,24 @@ import { randomUUID } from 'node:crypto';
 import { TopicMessageSubmitTransaction, Client, PrivateKey } from '@hiero-ledger/sdk';
 import { missingE2EEnv } from './_helpers.js';
 
-const missing = missingE2EEnv(['HEDERA_XENI_AUDIT_TOPIC_ID']);
+const missing = missingE2EEnv(['HEDERA_XENI_AUDIT_TOPIC_ID', 'HEDERA_MIRROR_NODE_URL']);
 
 /**
  * Poll Mirror Node until we find a topic message whose decoded contents
  * contain the given marker. Returns the message object on hit, throws on
  * timeout. Short-timeout-friendly for tests.
+ *
+ * The Mirror Node base URL is passed in by the caller — sourced from
+ * `HEDERA_MIRROR_NODE_URL` via `missingE2EEnv()`. No hardcoded fallback:
+ * matches the runtime server's fail-fast posture (docs/DESIGN.md §3).
  */
 async function pollMirrorNodeForMessage(
-  network: string,
+  mirrorNodeUrl: string,
   topicId: string,
   marker: string,
   timeoutMs = 10_000,
 ): Promise<{ sequence_number: number; message: string }> {
-  const base =
-    network === 'mainnet'
-      ? 'https://mainnet-public.mirrornode.hedera.com'
-      : 'https://testnet.mirrornode.hedera.com';
-  const url = `${base}/api/v1/topics/${encodeURIComponent(topicId)}/messages?order=desc&limit=50`;
+  const url = `${mirrorNodeUrl}/api/v1/topics/${encodeURIComponent(topicId)}/messages?order=desc&limit=50`;
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -84,6 +84,7 @@ describe.skipIf(missing.length > 0)('E2E / audit-submit round-trip (real testnet
       const agentKeyRaw = process.env['HEDERA_AGENT_KEY']!;
       const network = process.env['HEDERA_NETWORK']!;
       const topicId = process.env['HEDERA_XENI_AUDIT_TOPIC_ID']!;
+      const mirrorNodeUrl = process.env['HEDERA_MIRROR_NODE_URL']!;
 
       // We submit directly via the Hiero SDK (not round-tripped through
       // MCP's JSON-RPC surface) because:
@@ -116,7 +117,7 @@ describe.skipIf(missing.length > 0)('E2E / audit-submit round-trip (real testnet
 
         // Mirror Node indexing typically lags 2–5s on testnet. Poll up
         // to 20s (test timeout allows for slower days).
-        const found = await pollMirrorNodeForMessage(network, topicId, marker, 20_000);
+        const found = await pollMirrorNodeForMessage(mirrorNodeUrl, topicId, marker, 20_000);
         const decoded = Buffer.from(found.message, 'base64').toString('utf8');
         const parsed = JSON.parse(decoded) as { event_id: string; event: string };
         expect(parsed.event_id).toBe(marker);
