@@ -68,7 +68,7 @@ We stay on the happy path and touch nothing upstream (no forks, no patches, no r
 
 | Con                                                    | Mitigation                                                                                                                                               |
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **AgentService Buddy has more Go work**                | TS reference implementations + 68 tests live in `reference-impl/` as behavioral specs to port against. Handover doc walks through each guard's contract. |
+| **AgentService  has more Go work**                | TS reference implementations + 68 tests live in `reference-impl/` as behavioral specs to port against. Handover doc walks through each guard's contract. |
 | **Lose single-language Xeni policy story**             | Was never quite true — `accountResolver` was TS-only, but all callers were already Go. Now it's uniformly Go.                                            |
 | **TS reference code is technically unused at runtime** | Kept in `reference-impl/` and still executed by `vitest` so the specs stay live. Tests serve as executable documentation of expected guard behavior.     |
 | **Design doc §6 ("custom Xeni layer") is reduced**     | Rewritten to reflect current state — no MCP-side plugin, no AbstractHook wrappers, no custom tools.                                                      |
