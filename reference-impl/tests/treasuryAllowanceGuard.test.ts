@@ -4,7 +4,8 @@
  * treasuryAllowanceGuard unit tests.
  *
  * Unlike spendPolicyGuard/mandateBudgetGuard (pure), this hook has real
- * async I/O (Mirror Node query) and real side effects (Slack webhook).
+ * async I/O (Mirror Node query) and real side effects (alert webhook —
+ * transport-agnostic; the Go port chooses the concrete sender).
  * Dependencies are injected via a `deps` object so tests can supply
  * mocks without touching network.
  *
@@ -17,15 +18,15 @@
  *   - alert fires when this refund causes remaining to cross below threshold
  *   - alert does NOT fire when already below threshold (no spam)
  *   - alert does NOT fire when amount keeps remaining at/above threshold
- *   - Slack send is fire-and-forget (hook returns before Slack resolves)
- *   - Slack send failure does NOT turn pass into reject (logged only)
- *   - alert payload shape: envLabel, remainingHbar, cap, fiat, UTC+PST timestamps, runbook ref
+ *   - alert send is fire-and-forget (hook returns before alert resolves)
+ *   - alert send failure does NOT turn pass into reject (logged only)
+ *   - alert payload shape: envLabel, remainingHbar, cap, fiat, UTC+local timestamps, runbook ref
  *   - fiat equiv computed when fiatPerHbar provided; null when absent
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import type {
-  SlackAlertPayload,
+  AlertPayload,
   TreasuryAllowanceGuardDeps,
   TreasuryAllowanceGuardInput,
 } from '../hooks/treasuryAllowanceGuard.js';
@@ -35,7 +36,7 @@ import { treasuryAllowanceGuard } from '../hooks/treasuryAllowanceGuard.js';
 function makeDeps(overrides: Partial<TreasuryAllowanceGuardDeps> = {}): TreasuryAllowanceGuardDeps {
   return {
     queryRemainingAllowanceHbar: vi.fn(() => Promise.resolve(10_000)),
-    sendSlackAlert: vi.fn(() => Promise.resolve()),
+    sendAlert: vi.fn(() => Promise.resolve()),
     dailyCapHbar: 10_000,
     thresholdFraction: 0.8, // alert at 80% consumed → below 2000 HBAR remaining
     envLabel: 'testnet-ci',
@@ -88,14 +89,14 @@ describe('treasuryAllowanceGuard', () => {
       expect(result.alertFired).toBe(false);
     });
 
-    it('does not fire Slack alert on allowance reject (would spam as treasury already low)', async () => {
-      const sendSlackAlert = vi.fn(() => Promise.resolve());
+    it('does not fire alert on allowance reject (would spam as treasury already low)', async () => {
+      const sendAlert = vi.fn(() => Promise.resolve());
       const deps = makeDeps({
         queryRemainingAllowanceHbar: () => Promise.resolve(5),
-        sendSlackAlert,
+        sendAlert,
       });
       await treasuryAllowanceGuard({ ...baseInput, amountHbar: 10 }, deps);
-      expect(sendSlackAlert).not.toHaveBeenCalled();
+      expect(sendAlert).not.toHaveBeenCalled();
     });
   });
 
@@ -165,18 +166,18 @@ describe('treasuryAllowanceGuard', () => {
     it('fires alert when refund causes remaining to drop below threshold', async () => {
       // dailyCap=10_000, threshold=0.8 → alert when remaining < 2_000.
       // Pre-refund remaining = 2_500 (above). Amount = 600 → after = 1_900 (below).
-      const sendSlackAlert = vi.fn(() => Promise.resolve());
+      const sendAlert = vi.fn(() => Promise.resolve());
       const deps = makeDeps({
         queryRemainingAllowanceHbar: () => Promise.resolve(2_500),
-        sendSlackAlert,
+        sendAlert,
       });
       const result = await treasuryAllowanceGuard({ ...baseInput, amountHbar: 600 }, deps);
 
       expect(result.passed).toBe(true);
       expect(result.alertFired).toBe(true);
-      expect(sendSlackAlert).toHaveBeenCalledOnce();
+      expect(sendAlert).toHaveBeenCalledOnce();
 
-      const payload = sendSlackAlert.mock.calls[0]?.[0] as SlackAlertPayload;
+      const payload = sendAlert.mock.calls[0]?.[0] as AlertPayload;
       expect(payload.envLabel).toBe('testnet-ci');
       expect(payload.remainingHbar).toBeCloseTo(1_900, 6);
       expect(payload.dailyCapHbar).toBe(10_000);
@@ -190,57 +191,57 @@ describe('treasuryAllowanceGuard', () => {
     it('does NOT fire alert when already below threshold before this refund', async () => {
       // Already below: remaining was 1_500 (below 2_000 threshold), amount = 100
       // → after = 1_400 (still below). Should not spam a second alert.
-      const sendSlackAlert = vi.fn(() => Promise.resolve());
+      const sendAlert = vi.fn(() => Promise.resolve());
       const deps = makeDeps({
         queryRemainingAllowanceHbar: () => Promise.resolve(1_500),
-        sendSlackAlert,
+        sendAlert,
       });
       const result = await treasuryAllowanceGuard({ ...baseInput, amountHbar: 100 }, deps);
 
       expect(result.passed).toBe(true);
       expect(result.alertFired).toBe(false);
-      expect(sendSlackAlert).not.toHaveBeenCalled();
+      expect(sendAlert).not.toHaveBeenCalled();
     });
 
     it('does NOT fire alert when remaining stays at/above threshold after refund', async () => {
       // remaining 5_000, amount 10 → after 4_990, still above 2_000 threshold.
-      const sendSlackAlert = vi.fn(() => Promise.resolve());
+      const sendAlert = vi.fn(() => Promise.resolve());
       const deps = makeDeps({
         queryRemainingAllowanceHbar: () => Promise.resolve(5_000),
-        sendSlackAlert,
+        sendAlert,
       });
       const result = await treasuryAllowanceGuard(baseInput, deps);
 
       expect(result.passed).toBe(true);
       expect(result.alertFired).toBe(false);
-      expect(sendSlackAlert).not.toHaveBeenCalled();
+      expect(sendAlert).not.toHaveBeenCalled();
     });
 
     it('includes fiat equivalent in alert payload when fiatPerHbar provided', async () => {
-      const sendSlackAlert = vi.fn(() => Promise.resolve());
+      const sendAlert = vi.fn(() => Promise.resolve());
       const deps = makeDeps({
         queryRemainingAllowanceHbar: () => Promise.resolve(2_500),
-        sendSlackAlert,
+        sendAlert,
       });
       await treasuryAllowanceGuard({ ...baseInput, amountHbar: 600, fiatPerHbar: 0.2 }, deps);
 
-      const payload = sendSlackAlert.mock.calls[0]?.[0] as SlackAlertPayload;
+      const payload = sendAlert.mock.calls[0]?.[0] as AlertPayload;
       expect(payload.fiatPerHbar).toBe(0.2);
       // 1_900 HBAR * $0.2/HBAR = $380
       expect(payload.fiatEquivalent).toBeCloseTo(380, 6);
     });
   });
 
-  describe('Slack send is fire-and-forget', () => {
-    it('does NOT turn pass into reject when Slack send fails', async () => {
-      const sendSlackAlert = vi.fn(() => Promise.reject(new Error('slack down')));
+  describe('alert send is fire-and-forget', () => {
+    it('does NOT turn pass into reject when alert send fails', async () => {
+      const sendAlert = vi.fn(() => Promise.reject(new Error('alert webhook down')));
       const deps = makeDeps({
         queryRemainingAllowanceHbar: () => Promise.resolve(2_500),
-        sendSlackAlert,
+        sendAlert,
       });
       const result = await treasuryAllowanceGuard({ ...baseInput, amountHbar: 600 }, deps);
 
-      // Transfer decision is independent of Slack success.
+      // Transfer decision is independent of alert-send success.
       expect(result.passed).toBe(true);
       expect(result.alertFired).toBe(true);
       expect(result.remainingAllowanceAfter).toBeCloseTo(1_900, 6);
@@ -250,30 +251,30 @@ describe('treasuryAllowanceGuard', () => {
       await new Promise((resolve) => setImmediate(resolve));
     });
 
-    it('does NOT await the Slack send (hook returns before Slack resolves)', async () => {
-      let slackResolved = false;
-      const sendSlackAlert = vi.fn(
+    it('does NOT await the alert send (hook returns before alert resolves)', async () => {
+      let alertResolved = false;
+      const sendAlert = vi.fn(
         () =>
           new Promise<void>((resolve) => {
             setTimeout(() => {
-              slackResolved = true;
+              alertResolved = true;
               resolve();
             }, 50);
           }),
       );
       const deps = makeDeps({
         queryRemainingAllowanceHbar: () => Promise.resolve(2_500),
-        sendSlackAlert,
+        sendAlert,
       });
 
       const result = await treasuryAllowanceGuard({ ...baseInput, amountHbar: 600 }, deps);
-      // The hook returns before the 50ms Slack timer fires.
-      expect(slackResolved).toBe(false);
+      // The hook returns before the 50ms alert timer fires.
+      expect(alertResolved).toBe(false);
       expect(result.passed).toBe(true);
 
       // Clean up the pending promise so no unhandled-rejection warnings.
       await new Promise((resolve) => setTimeout(resolve, 60));
-      expect(slackResolved).toBe(true);
+      expect(alertResolved).toBe(true);
     });
   });
 

@@ -3,18 +3,18 @@
 /**
  * treasuryAllowanceGuard — rejects refund `transfer_hbar_with_allowance`
  * calls that would exceed the remaining treasury→agent daily allowance.
- * Also fires Slack alert at the 80% threshold.
+ * Also fires an ops alert at the 80% threshold.
  *
  * Stage: postParamsNormalizationHook (refund path only — detected by owner
  * role = 'xeni_treasury').
- * Side effects: Slack webhook call (alert only, not audit).
+ * Side effects: alert webhook call (alert only, not audit).
  *
  * See docs/DESIGN.md §4 (refund allowance strategy).
  *
- * Alert channels:
- *   #non-prod-oncall-fund-treasury (dev/qa/uat)
- *   #oncall-fund-treasury (prod)
- *   workspace: xeniworkspace.slack.com
+ * Alert transport + destination are AgentService-owned configuration —
+ * this spec deliberately does not name a specific channel, workspace,
+ * or webhook implementation. The Go port supplies the concrete sender
+ * (Slack, PagerDuty, email, etc.) via the injected `sendAlert` dep.
  *
  * Source of truth for remaining allowance: Hedera Mirror Node (no local DB state).
  */
@@ -29,11 +29,11 @@ export interface TreasuryAllowanceGuardInput {
   intentId: string;
   /** Optional correlation ID threaded through from AgentService for tracing. */
   correlationId?: string;
-  /** Optional fiat/HBAR price for Slack alert context (USD per HBAR). */
+  /** Optional fiat/HBAR price for alert context (USD per HBAR). */
   fiatPerHbar?: number;
 }
 
-export interface SlackAlertPayload {
+export interface AlertPayload {
   envLabel: string;
   remainingHbar: number;
   dailyCapHbar: number;
@@ -41,7 +41,7 @@ export interface SlackAlertPayload {
   fiatPerHbar: number | null;
   /** UTC ISO 8601. Source of truth timestamp. */
   timestampUtc: string;
-  /** Human-readable PST for ops channel (per team channel + timezone conventions). */
+  /** Human-readable local time for ops display (per team timezone conventions). */
   timestampPst: string;
   runbookRef: string;
 }
@@ -57,10 +57,11 @@ export interface TreasuryAllowanceGuardDeps {
   queryRemainingAllowanceHbar: () => Promise<number>;
 
   /**
-   * Fire-and-forget Slack webhook sender. The hook does NOT block on
-   * this Promise resolving — `.catch` is attached to log failures.
+   * Fire-and-forget alert sender (transport-agnostic — Slack/PagerDuty/etc.
+   * is AgentService's choice). The hook does NOT block on this Promise
+   * resolving — `.catch` is attached to log failures.
    */
-  sendSlackAlert: (payload: SlackAlertPayload) => Promise<void>;
+  sendAlert: (payload: AlertPayload) => Promise<void>;
 
   /** Daily cap in HBAR (from HEDERA_REFUND_DAILY_CAP_HBAR env). */
   dailyCapHbar: number;
@@ -85,7 +86,7 @@ export interface TreasuryAllowanceGuardResult {
    * should branch on `passed` first).
    */
   remainingAllowanceAfter: number;
-  /** Whether a Slack alert was fired as a side effect of this call. */
+  /** Whether an ops alert was fired as a side effect of this call. */
   alertFired: boolean;
   /** Human-readable reason; populated on reject, omitted on pass. */
   reason?: string;
@@ -95,7 +96,7 @@ const RUNBOOK_REF = 'docs/RUNBOOKS.md#treasury-replenishment';
 const PST_TIMEZONE = 'America/Los_Angeles';
 
 /**
- * Hook with real side effects (Slack webhook) and real async I/O
+ * Hook with real side effects (alert webhook) and real async I/O
  * (Mirror Node query). See docs/DESIGN.md §4 (refund allowance strategy).
  *
  * Decision flow:
@@ -106,7 +107,7 @@ const PST_TIMEZONE = 'America/Los_Angeles';
  *   3. Reject if amount > current remaining (treasury needs top-up).
  *   4. Compute remainingAfter; if this refund crosses the alert threshold
  *      (remainingBefore >= threshold && remainingAfter < threshold),
- *      fire Slack alert fire-and-forget.
+ *      fire ops alert fire-and-forget.
  *   5. Pass.
  *
  * The `thresholdFraction` convention mirrors `HEDERA_REFUND_ALERT_THRESHOLD`:
@@ -118,7 +119,7 @@ export async function treasuryAllowanceGuard(
   deps: TreasuryAllowanceGuardDeps,
 ): Promise<TreasuryAllowanceGuardResult> {
   const { amountHbar, intentId, correlationId, fiatPerHbar } = input;
-  const { queryRemainingAllowanceHbar, sendSlackAlert, dailyCapHbar, thresholdFraction, envLabel } =
+  const { queryRemainingAllowanceHbar, sendAlert, dailyCapHbar, thresholdFraction, envLabel } =
     deps;
 
   // --- 1. Input validation (fail-closed) ---
@@ -199,7 +200,7 @@ export async function treasuryAllowanceGuard(
   let alertFired = false;
   if (crossedThreshold) {
     const now = new Date();
-    const payload: SlackAlertPayload = {
+    const payload: AlertPayload = {
       envLabel,
       remainingHbar: remainingAfterHbar,
       dailyCapHbar,
@@ -210,10 +211,10 @@ export async function treasuryAllowanceGuard(
       runbookRef: RUNBOOK_REF,
     };
 
-    // Fire-and-forget: don't block the hook's return on Slack network I/O.
-    // Slack failures log but don't affect the refund decision.
-    void sendSlackAlert(payload).catch((err: unknown) => {
-      log.error('treasuryAllowanceGuard Slack alert failed (non-blocking)', {
+    // Fire-and-forget: don't block the hook's return on alert network I/O.
+    // Alert failures log but don't affect the refund decision.
+    void sendAlert(payload).catch((err: unknown) => {
+      log.error('treasuryAllowanceGuard alert failed (non-blocking)', {
         intentId,
         correlationId,
         error: String(err),

@@ -11,7 +11,7 @@
 > 1. **Single-client model** — `HederaMCPToolkit({ client, configuration })` takes one signing identity for the whole server. Dual-identity (operator + agent) inside one MCP would require running two toolkit instances, forking the MCP package, or fragile mid-transaction client swaps.
 > 2. **No per-call metadata passthrough** — upstream drops MCP `_meta` (in `_extra`) before calling tools; hooks can't see per-call `intentId` / policy / mandate state without extending every tool's zod params (custom wrapper tools) or forking upstream.
 >
-> **Decision:** MCP stays thin (upstream toolkit + transports + agent client + bootstrap scripts). All Xeni business logic (spend policy, mandate budget, treasury allowance + Slack alert + Mirror Node query, audit envelope builder, fee calculator) moves to AgentService (Go). TS reference implementations from PR #4/#5/#6 go to `reference-impl/` as executable specs.
+> **Decision:** MCP stays thin (upstream toolkit + transports + agent client + bootstrap scripts). All Xeni business logic (spend policy, mandate budget, treasury allowance + ops alerting + Mirror Node query, audit envelope builder, fee calculator) moves to AgentService (Go). TS reference implementations from PR #4/#5/#6 go to `reference-impl/` as executable specs.
 >
 > **Sections affected by this pivot:** §3 (operator now cold), §6 (plugin surface empty), §7 (fee plugin moves), §10 (agent pays HCS fees, not operator), §13 (audit flow simpler), §14 (test strategy), §16 (response shape drops `auditEnvelope`). Each section below is updated; pre-pivot content is kept where still accurate.
 >
@@ -83,9 +83,9 @@ Two external-service URLs are required at startup in every environment — dev, 
 | Decision                    | Value                                                                                                                                                                                                                                                                                                                                                                |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Sizing**                  | Rolling daily cap, **HBAR-denominated** (e.g. 10k HBAR/day; tune with volume data). Deterministic, no oracle dependency.                                                                                                                                                                                                                                             |
-| **Fiat context in alerts**  | Slack alert message includes fiat-equivalent of remaining balance and daily cap, **computed at alert time** via upstream `get_exchange_rate_tool` (Mirror Node, HBAR→USD only; CoinGecko planned for multi-currency in Phase 2). Cap itself stays HBAR. Rate is never cached across alerts — fresh query per emit. See [XENI_LAYER.md §6 "Currency conversion"](XENI_LAYER.md#6-currency-conversion-hbar--fiat) for the full dynamic-conversion convention.                                                                                                         |
+| **Fiat context in alerts**  | Alert payload includes fiat-equivalent of remaining balance and daily cap, **computed at alert time** via upstream `get_exchange_rate_tool` (Mirror Node, HBAR→USD only; CoinGecko planned for multi-currency in Phase 2). Cap itself stays HBAR. Rate is never cached across alerts — fresh query per emit. See [XENI_LAYER.md §6 "Currency conversion"](XENI_LAYER.md#6-currency-conversion-hbar--fiat) for the full dynamic-conversion convention.                                                                                                         |
 | **Refresh**                 | Manual nightly top-up — on-call ops signs new approval.                                                                                                                                                                                                                                                                                                              |
-| **Alert**                   | Slack webhook at 80% consumed (20% remaining). Channels per env: `#non-prod-oncall-fund-treasury` (dev/qa/uat), `#oncall-fund-treasury` (prod). Workspace: `xeniworkspace.slack.com`.                                                                                                                                                                                |
+| **Alert**                   | Ops alert webhook at 80% consumed (20% remaining). Transport + destination (channel / workspace / recipient mapping) is AgentService-owned configuration — this MCP repo does not name a specific channel or workspace. Operators wire the alert to whatever they use (Slack, PagerDuty, email, etc.). |
 | **Source of truth**         | Query Hedera Mirror Node for remaining allowance — no local DB state.                                                                                                                                                                                                                                                                                                |
 | **Runbook**                 | [RUNBOOKS.md](RUNBOOKS.md) covers: (a) nightly top-up, (b) cap-hit UX, (c) mid-day extension, (d) on-call escalation. Weekend/vacation coverage via on-call rotation implied by channel names.                                                                                                                                                                       |
 | **Timezone (cutover only)** | `America/Los_Angeles` (PST/PDT) — 00:00 Pacific is the daily cap-reset + replenishment window boundary. IANA name used in code to handle DST. **Scope: only the cutover boundary.** All persisted timestamps, HCS payload times, inter-service protocol fields, and log lines remain **UTC**. PST is resolved to UTC at the boundary by the scheduler; never stored. |
@@ -172,7 +172,7 @@ Pre-pivot MCP-side layer — **relocated, not cancelled.** `spendPolicyGuard` an
 | ---------------------------------------------------------- | --------------------------------------------------------------- |
 | `spendPolicyGuard`                                         | AgentService, pre-`approve_hbar_allowance` call                 |
 | `mandateBudgetGuard`                                       | AgentService, pre-`transfer_hbar_with_allowance` (payment path) |
-| `treasuryAllowanceGuard` + Slack alert + Mirror Node query | AgentService, pre-`transfer_hbar_with_allowance` (refund path)  |
+| `treasuryAllowanceGuard` + ops alert + Mirror Node query | AgentService, pre-`transfer_hbar_with_allowance` (refund path)  |
 | `auditEnvelopeBuilder`                                     | AgentService, post-MCP-response before outbox write             |
 | `accountResolver`                                          | Not needed — single runtime client (agent)                      |
 
@@ -255,9 +255,9 @@ Per-message HCS fee ~$0.0002 (300-byte payload). At 10k bookings/day × ~5 event
 
 **Rules:**
 
-- HCS = audit only, never ops signaling (Slack handles alerts; HCS is ~$0.0002 each, Slack is free).
+- HCS = audit only, never ops signaling (the alert webhook handles ops; HCS is ~$0.0002 each, the webhook transport is essentially free).
 - **Agent account pays HCS fees** post-pivot. Previously operator was going to pay, but the single-client constraint (§3) makes agent the only runtime signer, so agent covers every `submit_message` call driven by AgentService's outbox worker.
-- Agent therefore needs its own balance monitoring + low-balance Slack alert (same `#non-prod-oncall-fund-treasury` / `#oncall-fund-treasury` channels as treasury).
+- Agent therefore needs its own balance monitoring + low-balance ops alert (routed to the same on-call destination as treasury alerts; AgentService-owned config).
 - Keep payloads compact — every 100 bytes saved = ~$0.00011/event. (Payload-shape choice now lives in AgentService's Go `audit.BuildEnvelope` — not this MCP.)
 - Testnet for all dev + UAT.
 
@@ -300,7 +300,7 @@ Per-message HCS fee ~$0.0002 (300-byte payload). At 10k bookings/day × ~5 event
 │  2. Pre-call guards (fail-fast; no MCP round-trip on reject):       │
 │       spendPolicyGuard      (allowance ≤ user policy ceiling)       │
 │       mandateBudgetGuard    (amount ≤ mandate remaining)            │
-│       treasuryAllowanceGuard (refund only — Mirror Node + Slack)    │
+│       treasuryAllowanceGuard (refund only — Mirror Node + alert)    │
 │                                                                     │
 │  3. MCP call (stdio) ──────────────────────────────┐                │
 │                                                    │                │
@@ -341,7 +341,7 @@ Per-message HCS fee ~$0.0002 (300-byte payload). At 10k bookings/day × ~5 event
 │ 11. For each row: MCP call submit_message(audit_topic_id, payload) │
 │ 12. On success:  UPDATE status=done, sequence=<topicSeq>           │
 │     On failure:  retry_count++, exponential backoff                │
-│     On retry > MAX: status=dead_letter  +  Slack alert             │
+│     On retry > MAX: status=dead_letter  +  ops alert               │
 │                                                                    │
 │ Metrics: outbox_depth, dead_letter_count → dashboard               │
 └────────────────────────────────────────────────────────────────────┘
@@ -370,7 +370,7 @@ hedera_audit_outbox (
 - Batch: 50 pending rows per tick.
 - Backoff: exponential, base 2s, cap 5min.
 - Max retries: 10 (dead-letter after ~85 min of attempts).
-- Dead-letter alert: Slack webhook (same channel as treasury allowance alerts).
+- Dead-letter alert: ops webhook (same destination as treasury allowance alerts; AgentService-owned config).
 
 ### Invariants
 
@@ -414,7 +414,7 @@ Unchanged. HCS submits still cost ~$0.0002 each; the outbox adds DB storage (tri
 | **E2E (testnet)**        | Real testnet MCP server, real Hedera testnet, real agent account (Anand-funded). Exercises: (a) User→Agent allowance grant flow (MCP builds unsigned bytes in RETURN_BYTES mode), (b) `transfer_hbar_with_allowance` payment, (c) refund via treasury→agent allowance, (d) `submit_message` round-trip. Envelope-building is AgentService's responsibility — not exercised here. | `vitest --project=e2e` + `@hiero-ledger/sdk` testnet client | **Nightly** on `testnet-ci` (not per-PR — testnet HBAR cost + latency) |
 | **Smoke (post-deploy)**  | Cutover-day sanity: one booking intent end-to-end on `testnet-uat` with AgentService integrated. Under §15 cutover step 7.                                                                                                                                                                                                                                                       | Manual checklist                                            | Manual gate before mainnet promotion                                   |
 
-**Testnet account funding:** Anand owns funding the agent testnet account across `dev`, `testnet-ci`, `testnet-uat`. (Operator + treasury are cold — funded once at bootstrap; don't burn ongoing testnet HBAR.) Runbook: low-balance Slack alert to `#non-prod-oncall-fund-treasury`.
+**Testnet account funding:** Anand owns funding the agent testnet account across `dev`, `testnet-ci`, `testnet-uat`. (Operator + treasury are cold — funded once at bootstrap; don't burn ongoing testnet HBAR.) Runbook: low-balance ops alert to the configured non-prod destination.
 
 `TODO(p2):` testnet balance threshold — define a concrete number (e.g. "7 days of expected burn" in HBAR). Fill in [RUNBOOKS.md](RUNBOOKS.md) after first UAT gives a burn-rate data point.
 

@@ -26,7 +26,7 @@ reference-impl/
 ├── hooks/
 │   ├── spendPolicyGuard.ts       (pre-approve_hbar_allowance ceiling check)
 │   ├── mandateBudgetGuard.ts     (pre-transfer_hbar_with_allowance budget check)
-│   ├── treasuryAllowanceGuard.ts (pre-refund check + Slack alert + Mirror Node dep injection)
+│   ├── treasuryAllowanceGuard.ts (pre-refund check + ops alert + Mirror Node dep injection)
 │   └── auditEnvelopeBuilder.ts   (post-receipt envelope shape)
 ├── policies/
 │   └── accountResolver.ts        (RETIRED post-pivot — historical context only; do NOT port)

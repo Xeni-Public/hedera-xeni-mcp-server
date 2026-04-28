@@ -62,7 +62,7 @@ Behavioral specification, **not** registered on the MCP toolkit. AgentService's 
 - `reference-impl/hbar.ts` — HBAR utilities (tinybar integer math, parse/format).
 - `reference-impl/hooks/spendPolicyGuard.ts` — rejects `approve_hbar_allowance` when the requested amount exceeds the user's policy ceiling.
 - `reference-impl/hooks/mandateBudgetGuard.ts` — rejects `transfer_hbar_with_allowance` when the amount would exceed the intent's remaining mandate.
-- `reference-impl/hooks/treasuryAllowanceGuard.ts` — rejects refund transfers when they would exceed the treasury's remaining daily cap (queried via `get_treasury_allowance_remaining`). Emits a Slack alert at 80% consumed.
+- `reference-impl/hooks/treasuryAllowanceGuard.ts` — rejects refund transfers when they would exceed the treasury's remaining daily cap (queried via `get_treasury_allowance_remaining`). Emits an ops alert at 80% consumed (transport — Slack/PagerDuty/email — is AgentService-owned configuration).
 - `reference-impl/hooks/auditEnvelopeBuilder.ts` — builds the HCS audit envelope payload (does NOT submit; submission is the outbox worker's job).
 - `reference-impl/policies/accountResolver.ts` — selects operator vs. agent Client per tool (for MCPs that run a dual-client model; our runtime uses single-client, but the spec is kept for future multi-role).
 - `reference-impl/fees/FeeCalculator.ts` + `DefaultFeeCalculator.ts` — reference interface + default implementation for Xeni-MoR fee splits. Real fee logic lives in a private plugin if/when loaded at runtime.
@@ -157,7 +157,7 @@ All files listed here are Xeni-authored additions; all carry the `Authored-by: A
 | `reference-impl/logger.ts` | Spec logger (for reference-impl tests) |
 | `reference-impl/hooks/spendPolicyGuard.ts` | Spec for `approve_hbar_allowance` ceiling guard |
 | `reference-impl/hooks/mandateBudgetGuard.ts` | Spec for `transfer_hbar_with_allowance` mandate guard |
-| `reference-impl/hooks/treasuryAllowanceGuard.ts` | Spec for refund-cap guard + 80% Slack alert |
+| `reference-impl/hooks/treasuryAllowanceGuard.ts` | Spec for refund-cap guard + 80% ops alert (transport-agnostic) |
 | `reference-impl/hooks/auditEnvelopeBuilder.ts` | Spec for audit envelope builder (outbox input) |
 | `reference-impl/policies/accountResolver.ts` | Spec for operator-vs-agent client resolver |
 | `reference-impl/fees/FeeCalculator.ts` | Spec fee-calculator interface |
@@ -229,7 +229,7 @@ For completeness — these are not ours, and we do not modify them:
 
 ## 6. Currency conversion (HBAR ↔ fiat)
 
-User-facing prices are quoted in fiat (USD today; EUR / INR / etc. in Phase 2). Every HBAR budget / allowance / payment number is reconciled to fiat somewhere in the flow — search results display fiat, intents carry both `budget_hbar` and `max_price` USD, Slack alerts show fiat-equivalent of remaining treasury allowance. **All fiat reconciliation is dynamic and per-request** — never hardcoded, never cached beyond a single request's lifetime.
+User-facing prices are quoted in fiat (USD today; EUR / INR / etc. in Phase 2). Every HBAR budget / allowance / payment number is reconciled to fiat somewhere in the flow — search results display fiat, intents carry both `budget_hbar` and `max_price` USD, ops alerts show fiat-equivalent of remaining treasury allowance. **All fiat reconciliation is dynamic and per-request** — never hardcoded, never cached beyond a single request's lifetime.
 
 ### 6.1 Tool: `get_exchange_rate_tool` (upstream)
 

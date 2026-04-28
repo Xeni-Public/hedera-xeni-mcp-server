@@ -19,7 +19,7 @@ AgentService now owns (Go-side port of TS reference code):
 | ---------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------ |
 | Spend-policy ceiling check                                 | `reference-impl/hooks/spendPolicyGuard.ts` + tests            | pre-`approve_hbar_allowance` call                                  |
 | Mandate budget check                                       | `reference-impl/hooks/mandateBudgetGuard.ts` + tests          | pre-`transfer_hbar_with_allowance` (payment path)                  |
-| Treasury allowance check + Slack alert + Mirror Node query | `reference-impl/hooks/treasuryAllowanceGuard.ts` + tests      | pre-`transfer_hbar_with_allowance` (refund path)                   |
+| Treasury allowance check + ops alert + Mirror Node query | `reference-impl/hooks/treasuryAllowanceGuard.ts` + tests      | pre-`transfer_hbar_with_allowance` (refund path)                   |
 | HCS audit envelope building                                | `reference-impl/hooks/auditEnvelopeBuilder.ts` + tests        | post-MCP-response, before outbox write                             |
 | Tinybar math + number validation                           | `reference-impl/hbar.ts` + tests                              | shared utility for all guards                                      |
 | Platform fee calculation                                   | `reference-impl/fees/{FeeCalculator,DefaultFeeCalculator}.ts` | interface + reference impl for audit envelope's `split_accounting` |
@@ -73,21 +73,21 @@ All files land in `reference-impl/` in the MCP repo (PR #9) as executable TypeSc
 
 **Test coverage target:** ports of all 20 TS test cases.
 
-### 3. Treasury-allowance guard (pre-refund-`transfer_hbar_with_allowance`) — with Slack alert + Mirror Node query
+### 3. Treasury-allowance guard (pre-refund-`transfer_hbar_with_allowance`) — with ops alert + Mirror Node query
 
 **Reference:** `reference-impl/hooks/treasuryAllowanceGuard.ts`, `reference-impl/tests/treasuryAllowanceGuard.test.ts`.
 
 **Contract:**
 
 - Inputs: `amountHbar`, `intentId`, optional `correlationId`, optional `fiatPerHbar`.
-- Dependencies injected: `queryRemainingAllowanceHbar()`, `sendSlackAlert(payload)`, `dailyCapHbar`, `thresholdFraction`, `envLabel`.
+- Dependencies injected: `queryRemainingAllowanceHbar()`, `sendAlert(payload)`, `dailyCapHbar`, `thresholdFraction`, `envLabel`.
 - Decision flow:
   1. Input validation (fail-closed).
   2. Query Hedera Mirror Node for the current treasury→agent remaining allowance. Fail-closed on network error or invalid response.
   3. Reject if `amountHbar > currentRemaining` with reason `Refund (X HBAR) exceeds remaining treasury→agent allowance (Y HBAR). Treasury needs top-up — see docs/RUNBOOKS.md#treasury-replenishment.`
-  4. Threshold-crossing alert: fire `sendSlackAlert` fire-and-forget when this refund causes `remaining` to drop from `>= dailyCap * (1 - thresholdFraction)` to `< dailyCap * (1 - thresholdFraction)`. Only on the crossing refund, not every refund below threshold.
+  4. Threshold-crossing alert: fire `sendAlert` fire-and-forget when this refund causes `remaining` to drop from `>= dailyCap * (1 - thresholdFraction)` to `< dailyCap * (1 - thresholdFraction)`. Only on the crossing refund, not every refund below threshold.
   5. Pass.
-- Slack alert payload (lock the shape — ops subscribers depend on it):
+- Alert payload (lock the shape — ops subscribers depend on it; transport-agnostic):
   ```
   {
     envLabel: string,             // 'dev' / 'testnet-ci' / 'testnet-uat' / 'mainnet-prod'
@@ -100,9 +100,9 @@ All files land in `reference-impl/` in the MCP repo (PR #9) as executable TypeSc
     runbookRef: string            // 'docs/RUNBOOKS.md#treasury-replenishment'
   }
   ```
-- Slack send is **fire-and-forget**: hook does NOT await Slack; Slack failures do NOT flip the pass/reject decision (just log).
+- Alert send is **fire-and-forget**: hook does NOT await the alert; alert-send failures do NOT flip the pass/reject decision (just log).
 
-**Test coverage target:** ports of all 24 TS test cases — pay attention to the "fire-and-forget" tests (they lock the "Slack failure doesn't block transfer" invariant) and the threshold-crossing tests (they lock the no-spam rule).
+**Test coverage target:** ports of all 24 TS test cases — pay attention to the "fire-and-forget" tests (they lock the "alert-send failure doesn't block transfer" invariant) and the threshold-crossing tests (they lock the no-spam rule).
 
 ### 4. Audit envelope builder (post-MCP-response, pre-outbox-write)
 
@@ -262,16 +262,16 @@ const (
 
 Frontend Buddy: these are the stable UI-contract handles for the new error cases the pivot introduces. Switch on `errors[0].type` in your render layer.
 
-## Slack webhook — unset behavior (per PR #8 review M1)
+## Alert webhook — unset behavior (per PR #8 review M1)
 
-If `audit.deadletter_slack_webhook` (or equivalent env for `treasuryAllowanceGuard`) is empty or unset:
+If `audit.deadletter_alert_webhook` (or equivalent env for `treasuryAllowanceGuard`) is empty or unset:
 
-- `slackSender.Post(payload)` is a **no-op**
-- Emits a single `[slack] webhook not configured; skipping alert` **info log**
+- `alertSender.Post(payload)` is a **no-op**
+- Emits a single `[alert] webhook not configured; skipping` **info log**
 - Does NOT return an error to the caller
 - Does NOT retry
 
-This matches the fire-and-forget contract of the rest of the Slack path: missing webhook ≠ failure path.
+This matches the fire-and-forget contract of the rest of the alert path: missing webhook ≠ failure path.
 
 ## HANDOVER as source of truth (per PR #8 review C4)
 
@@ -299,7 +299,7 @@ The outbox PR B you were planning (M1 + M2 + outbox table + worker) expands slig
 
 - Pre-MCP guards (spendPolicyGuard, mandateBudgetGuard, treasuryAllowanceGuard)
 - Mirror Node client for treasury allowance query (inject into treasuryAllowanceGuard)
-- Slack webhook sender (same for treasuryAllowanceGuard alerts + outbox dead-letter alerts — may be able to share the sender)
+- Alert webhook sender (same for treasuryAllowanceGuard alerts + outbox dead-letter alerts — may be able to share the sender; transport is AgentService's choice)
 - Audit envelope builder (called between MCP response and outbox write)
 - FeeCalculator + default + private impl
 
@@ -313,7 +313,7 @@ The outbox PR B you were planning (M1 + M2 + outbox table + worker) expands slig
 - Drop: parsing for `auditEnvelope` in MCP response.
 - Add: three guards in `services/intentService/` or similar, invoked before MCP calls.
 - Add: `mirrornode.Client` wrapper for the remaining-allowance query.
-- Add: `slack.Sender` wrapper (webhook + structured payload).
+- Add: `alert.Sender` wrapper (webhook + structured payload; transport-agnostic).
 - Add: `fees.Calculator` interface + default impl + loader for private impl.
 - Add: `audit.BuildEnvelope(...)` function producing the canonical JSON for outbox rows.
 
@@ -323,7 +323,7 @@ Please re-scope PR B accordingly and re-estimate. The outbox table + drain worke
 
 - `reference-impl/README.md` — top-level description + porting guidance (will land in PR #9)
 - `docs/DESIGN.md` — §3 (account model), §6 (plugin surface — now empty), §13 (audit outbox flow), §14 (test strategy), §16 (response shape — now simpler)
-- `docs/RUNBOOKS.md` §Treasury replenishment — Slack channel names + runbook format
+- `docs/RUNBOOKS.md` §Treasury replenishment — runbook format (alert-destination wiring is AgentService-owned config)
 - Coordination log `memory/project_hedera_xeni_mcp_coordination.md` — the pivot discussion entries and decisions
 
 ## Contact

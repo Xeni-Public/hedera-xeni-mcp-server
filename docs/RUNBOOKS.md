@@ -4,11 +4,7 @@
 
 Operational procedures for ops + on-call engineers. Each section is a self-contained playbook.
 
-**Alert channels:**
-
-- `#non-prod-oncall-fund-treasury` (dev / qa / uat)
-- `#oncall-fund-treasury` (prod)
-- Workspace: `xeniworkspace.slack.com`
+**Alert destinations:** AgentService-owned configuration. The Hedera MCP itself does not emit alerts; alert routing (transport, workspace, channel/recipient mapping) is configured on the AgentService side and varies per deployment. This runbook references "the env's on-call alert destination" generically — operators wire that to whatever transport their environment uses (Slack channel, PagerDuty service, email list, etc.).
 
 ## Treasury replenishment (nightly manual top-up)
 
@@ -43,13 +39,13 @@ If the daily cap exhausts before midnight:
 
 1. Active refund attempts fail with `treasuryAllowanceGuard` rejection.
 2. Claude (via AgentService) informs the user: "Refund is processing — it will complete within 24 hours."
-3. On-call engineer is paged via `#oncall-fund-treasury` at the 80% threshold alert (giving 20% buffer to act).
+3. On-call engineer is paged via the prod alert destination at the 80% threshold (giving 20% buffer to act).
 4. On-call engineer evaluates: mid-day extension, or wait for nightly reset.
 5. If extension: engineer signs a top-up approval (steps 2–6 above, with smaller amount sufficient for rest of day).
 
 ### On-call escalation
 
-- Tier 1: whoever's on rotation in `#non-prod-oncall-fund-treasury` (non-prod) or `#oncall-fund-treasury` (prod).
+- Tier 1: whoever's on rotation in the env's on-call destination (non-prod or prod).
 - Tier 2: Hedera Buddy (for technical questions about the allowance mechanism).
 - Tier 3: Anand (for policy decisions — e.g., "should we double the daily cap?").
 
@@ -82,7 +78,7 @@ Operator, agent, and treasury testnet accounts need funding.
 
 ### Alert → action
 
-1. Low-balance Slack alert fires in `#non-prod-oncall-fund-treasury`.
+1. Low-balance alert fires in the non-prod on-call destination.
 2. Anand (current owner of testnet funding) tops up the account using testnet faucet or personal testnet HBAR reserves.
 3. Ack in channel with txId + new balance.
 
@@ -132,7 +128,7 @@ Separate from treasury top-up. The `operator` account pays HCS fees (topic ops +
 
 ### Alert → action
 
-- Low-balance Slack alert below some threshold (TBD).
+- Low-balance alert below some threshold (TBD).
 - Anand tops up operator from platform HBAR reserves.
 
 `TODO(p2):` fix the threshold here alongside the testnet-balance one. Same data source.

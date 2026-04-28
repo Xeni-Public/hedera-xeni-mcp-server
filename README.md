@@ -29,11 +29,11 @@ Concretely, v1 exposes the following MCP tools — each one labeled with its **S
 
 > **Note:** the table above lists the tools AgentService actually invokes. The full upstream surface registered via `allCorePlugins` is **~43 tools** (token / EVM / NFT / scheduled-tx / contract queries, etc.) — all exposed unchanged through `HederaMCPToolkit`. They're available for future use without code changes here. See [docs/XENI_LAYER.md §5](docs/XENI_LAYER.md) for the full upstream inventory.
 
-There is **no custom Xeni guard or wrapper layer** on the upstream tools — they run as-is through `HederaMCPToolkit`. The single Xeni-authored tool above (`get_treasury_allowance_remaining`) carries **no business logic** — it's a thin Mirror Node REST wrapper. All Xeni-specific business logic (spend-policy ceiling check, mandate-budget check, treasury-allowance check + Slack alerts, audit envelope building, fee calculation) lives in **AgentService** (Go). See the Architecture section below for why, and [docs/HANDOVER_TO_AGENT_SERVICE.md](docs/HANDOVER_TO_AGENT_SERVICE.md) for the Go-port specs.
+There is **no custom Xeni guard or wrapper layer** on the upstream tools — they run as-is through `HederaMCPToolkit`. The single Xeni-authored tool above (`get_treasury_allowance_remaining`) carries **no business logic** — it's a thin Mirror Node REST wrapper. All Xeni-specific business logic (spend-policy ceiling check, mandate-budget check, treasury-allowance check + ops alerts, audit envelope building, fee calculation) lives in **AgentService** (Go). See the Architecture section below for why, and [docs/HANDOVER_TO_AGENT_SERVICE.md](docs/HANDOVER_TO_AGENT_SERVICE.md) for the Go-port specs.
 
 ## Architecture: why guards live in AgentService, not in the MCP
 
-The original plan was a plugin in this MCP that wrapped upstream tools with Xeni-specific hooks (spend ceiling, mandate budget, treasury allowance + Slack alerts, audit envelope builder). After verifying upstream `@hashgraph/hedera-agent-kit-mcp@1.0.0`, two constraints made that MCP-side design impractical, and we pivoted to a thinner MCP with the guards on the AgentService side.
+The original plan was a plugin in this MCP that wrapped upstream tools with Xeni-specific hooks (spend ceiling, mandate budget, treasury allowance + ops alerts, audit envelope builder). After verifying upstream `@hashgraph/hedera-agent-kit-mcp@1.0.0`, two constraints made that MCP-side design impractical, and we pivoted to a thinner MCP with the guards on the AgentService side.
 
 ### What we leverage from upstream hedera-agent-kit-js
 
@@ -80,7 +80,7 @@ We stay on the happy path and touch nothing upstream (no forks, no patches, no r
 The pivot is scoped to guard placement. Everything else holds:
 
 - **Single global `xeni_audit` HCS topic per environment** (design §5)
-- **Rolling daily refund cap, Slack alert at 80% consumed, manual nightly top-up** (design §4) — still the ops story; just implemented in Go now
+- **Rolling daily refund cap, ops alert at 80% consumed, manual nightly top-up** (design §4) — still the ops story; just implemented in Go now (alert transport is AgentService-owned config)
 - **Outbox pattern for audit durability** (design §13) — unchanged
 - **Migrations are standalone deploy steps, Anand runs** (design §15) — unchanged
 - **UTC persistence + PST for ops readability + cap cutover** (design §4 tz rules) — unchanged
