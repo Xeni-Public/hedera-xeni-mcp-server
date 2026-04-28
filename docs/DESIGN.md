@@ -2,21 +2,6 @@
 
 # hedera-xeni-mcp-server — v1 Design
 
-**Status:** v1, scaffold + 3 guard hooks landed; **architectural pivot 2026-04-20** relocates guards to AgentService. See the pivot note below, then [HANDOVER_TO_AGENT_SERVICE.md](HANDOVER_TO_AGENT_SERVICE.md) for Go-port specs.
-
-> ### ⚑ 2026-04-20 — Architectural pivot to Option D (guards in AgentService)
->
-> Originally this MCP hosted the Xeni guard layer (4 hooks + 1 policy) on top of upstream tools. Verifying `@hashgraph/hedera-agent-kit-mcp@1.0.0` surfaced two upstream constraints that made that design impractical:
->
-> 1. **Single-client model** — `HederaMCPToolkit({ client, configuration })` takes one signing identity for the whole server. Dual-identity (operator + agent) inside one MCP would require running two toolkit instances, forking the MCP package, or fragile mid-transaction client swaps.
-> 2. **No per-call metadata passthrough** — upstream drops MCP `_meta` (in `_extra`) before calling tools; hooks can't see per-call `intentId` / policy / mandate state without extending every tool's zod params (custom wrapper tools) or forking upstream.
->
-> **Decision:** MCP stays thin (upstream toolkit + transports + agent client + bootstrap scripts). All Xeni business logic (spend policy, mandate budget, treasury allowance + ops alerting + Mirror Node query, audit envelope builder, fee calculator) moves to AgentService (Go). TS reference implementations from PR #4/#5/#6 go to `reference-impl/` as executable specs.
->
-> **Sections affected by this pivot:** §3 (operator now cold), §6 (plugin surface empty), §7 (fee plugin moves), §10 (agent pays HCS fees, not operator), §13 (audit flow simpler), §14 (test strategy), §16 (response shape drops `auditEnvelope`). Each section below is updated; pre-pivot content is kept where still accurate.
->
-> **What stays:** outbox pattern §13, per-env topic model §5, refund allowance strategy §4 (now implemented Go-side), global timezone rule, migration convention §15.
-
 ## 1. Purpose
 
 Thin MCP server on upstream [`hedera-agent-kit-js`](https://github.com/hashgraph/hedera-agent-kit-js) v4. Exposes upstream HBAR payment + HCS audit tools as-is via `HederaMCPToolkit`. No Xeni custom tools, no plugin-level hooks, no dual-client logic — AgentService (Go) owns the business logic that sits in front of and behind these calls.
@@ -511,6 +496,21 @@ The idealized shape above shows `topic_sequence_number` on the response. **In pr
 **Long-term (Phase 2+):** contribute an upstream PR to add `topicSequenceNumber` + `topicRunningHash` to `RawTransactionResponse`. Small, obvious win. Tracked.
 
 Full rationale + Go implementation hint in [HANDOVER_TO_AGENT_SERVICE.md → MCP response shape](HANDOVER_TO_AGENT_SERVICE.md).
+
+**Status:** v1, scaffold + 3 guard hooks landed; **architectural pivot 2026-04-20** relocates guards to AgentService. See the pivot note below, then [HANDOVER_TO_AGENT_SERVICE.md](HANDOVER_TO_AGENT_SERVICE.md) for Go-port specs.
+
+> ### ⚑ 2026-04-20 — Architectural pivot to Option D (guards in AgentService)
+>
+> Originally this MCP hosted the Xeni guard layer (4 hooks + 1 policy) on top of upstream tools. Verifying `@hashgraph/hedera-agent-kit-mcp@1.0.0` surfaced two upstream constraints that made that design impractical:
+>
+> 1. **Single-client model** — `HederaMCPToolkit({ client, configuration })` takes one signing identity for the whole server. Dual-identity (operator + agent) inside one MCP would require running two toolkit instances, forking the MCP package, or fragile mid-transaction client swaps.
+> 2. **No per-call metadata passthrough** — upstream drops MCP `_meta` (in `_extra`) before calling tools; hooks can't see per-call `intentId` / policy / mandate state without extending every tool's zod params (custom wrapper tools) or forking upstream.
+>
+> **Decision:** MCP stays thin (upstream toolkit + transports + agent client + bootstrap scripts). All Xeni business logic (spend policy, mandate budget, treasury allowance + ops alerting + Mirror Node query, audit envelope builder, fee calculator) moves to AgentService (Go). TS reference implementations from PR #4/#5/#6 go to `reference-impl/` as executable specs.
+>
+> **Sections affected by this pivot:** §3 (operator now cold), §6 (plugin surface empty), §7 (fee plugin moves), §10 (agent pays HCS fees, not operator), §13 (audit flow simpler), §14 (test strategy), §16 (response shape drops `auditEnvelope`). Each section below is updated; pre-pivot content is kept where still accurate.
+>
+> **What stays:** outbox pattern §13, per-env topic model §5, refund allowance strategy §4 (now implemented Go-side), global timezone rule, migration convention §15.
 
 ## Scaffold checklist (tracked — what this PR delivers)
 
