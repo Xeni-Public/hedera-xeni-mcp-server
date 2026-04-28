@@ -14,17 +14,22 @@ MCP (Model Context Protocol) server exposing Hedera HBAR payment + HCS audit too
 
 In one sentence: lets the AI travel agent spend HBAR from a user's wallet (within a pre-granted allowance) and log the resulting audit trail to a Hedera Consensus Service (HCS) topic — without the server ever holding the user's private key.
 
-Concretely, v1 exposes:
+Concretely, v1 exposes the following MCP tools — each one labeled with its **Source** so contributors know what Xeni added vs. what comes from the upstream community-supported agent kit:
 
-| Upstream tool (from `hedera-agent-kit`) | Used for                                                                                                                |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `approve_hbar_allowance`                | User A grants a spending allowance to the Xeni agent account (user-signed via wallet, `AgentMode.RETURN_BYTES`)         |
-| `transfer_hbar_with_allowance`          | Agent spends within the allowance to pay `xeni_treasury` (booking) or refund User A (treasury→agent refund allowance)   |
-| `transfer_hbar`                         | Direct transfer (used for ops flows, not user payments)                                                                 |
-| `submit_message`                        | HCS audit event submission (driven by AgentService's outbox worker, not by this server)                                 |
-| `create_topic`                          | One-time global `xeni_audit` topic creation per environment (via `scripts/bootstrap-audit-topic.ts`, not a server tool) |
+| Tool                                | Source                                                                  | Used for                                                                                                                                                                                                                              |
+| ----------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `approve_hbar_allowance`            | upstream — `@hashgraph/hedera-agent-kit` (`coreAccountPlugin`)          | User A grants a spending allowance to the Xeni agent account (user-signed via wallet, `AgentMode.RETURN_BYTES`)                                                                                                                       |
+| `transfer_hbar_with_allowance`      | upstream — `@hashgraph/hedera-agent-kit` (`coreAccountPlugin`)          | Agent spends within the allowance to pay `xeni_treasury` (booking) or refund User A (treasury→agent refund allowance)                                                                                                                 |
+| `transfer_hbar`                     | upstream — `@hashgraph/hedera-agent-kit` (`coreAccountPlugin`)          | Direct transfer (used for ops flows, not user payments)                                                                                                                                                                              |
+| `delete_hbar_allowance`             | upstream — `@hashgraph/hedera-agent-kit` (`coreAccountPlugin`)          | User A revokes a previously-granted allowance                                                                                                                                                                                         |
+| `submit_message`                    | upstream — `@hashgraph/hedera-agent-kit` (`coreConsensusPlugin`)        | HCS audit event submission (driven by AgentService's outbox worker, not by this server)                                                                                                                                              |
+| `create_topic`                      | upstream — `@hashgraph/hedera-agent-kit` (`coreConsensusPlugin`)        | One-time global `xeni_audit` topic creation per environment (used inside `scripts/bootstrap-audit-topic.ts`, not invoked at runtime)                                                                                                  |
+| `get_exchange_rate_tool`            | upstream — `@hashgraph/hedera-agent-kit` (`coreMiscQueriesPlugin`)      | HBAR↔USD rate, queried per-request for dynamic fiat conversion (no caching, no hardcoded rates — see [docs/XENI_LAYER.md §6](docs/XENI_LAYER.md))                                                                                     |
+| **`get_treasury_allowance_remaining`** | **Xeni — `xeniReadPlugin` (this repo)**                              | **The only Xeni-authored MCP tool.** Returns remaining HBAR in the (treasury → agent) refund allowance via Mirror Node REST. **Pure read, no business logic** — thin wrapper so AgentService has a single integration surface for treasury reads. See [`src/plugins/xeniRead/`](src/plugins/xeniRead/). |
 
-There is **no custom Xeni layer on top of these tools** in the MCP. Upstream tools are exposed as-is via `HederaMCPToolkit`. All Xeni-specific business logic (spend-policy ceiling check, mandate-budget check, treasury-allowance check + Slack alerts, audit envelope building) lives in **AgentService** (Go). See the Architecture section below for why, and [docs/HANDOVER_TO_AGENT_SERVICE.md](docs/HANDOVER_TO_AGENT_SERVICE.md) for the Go-port specs.
+> **Note:** the table above lists the tools AgentService actually invokes. The full upstream surface registered via `allCorePlugins` is **~43 tools** (token / EVM / NFT / scheduled-tx / contract queries, etc.) — all exposed unchanged through `HederaMCPToolkit`. They're available for future use without code changes here. See [docs/XENI_LAYER.md §5](docs/XENI_LAYER.md) for the full upstream inventory.
+
+There is **no custom Xeni guard or wrapper layer** on the upstream tools — they run as-is through `HederaMCPToolkit`. The single Xeni-authored tool above (`get_treasury_allowance_remaining`) carries **no business logic** — it's a thin Mirror Node REST wrapper. All Xeni-specific business logic (spend-policy ceiling check, mandate-budget check, treasury-allowance check + Slack alerts, audit envelope building, fee calculation) lives in **AgentService** (Go). See the Architecture section below for why, and [docs/HANDOVER_TO_AGENT_SERVICE.md](docs/HANDOVER_TO_AGENT_SERVICE.md) for the Go-port specs.
 
 ## Architecture: why guards live in AgentService, not in the MCP
 
@@ -138,11 +143,33 @@ Per-env account + topic isolation. No shared accounts across envs.
 | `testnet-uat`  | Hedera testnet (UAT) | `.env.testnet-uat`   |
 | `mainnet-prod` | Hedera mainnet       | Prod secrets manager |
 
+## What's in this repo (Xeni-authored vs. upstream)
+
+For the full canonical inventory of every file we added/changed vs. what comes from upstream unchanged, see **[docs/XENI_LAYER.md](docs/XENI_LAYER.md)**. At-a-glance summary:
+
+| Path                  | Owner                | Purpose                                                                                                                                                                                                                                                                                                       |
+| --------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `src/server.ts`       | Xeni                 | Server bootstrap — wires `HederaMCPToolkit` with `allCorePlugins` (upstream) + `xeniReadPlugin` (Xeni). Reads required env vars (`HEDERA_AGENT_ID/KEY`, `HEDERA_NETWORK`, `HEDERA_MIRROR_NODE_URL`, `HEDERA_HASHSCAN_BASE_URL`, etc.) with fail-fast on missing values. ~120 lines. |
+| `src/transports/`     | Xeni                 | stdio + StreamableHTTP transport wrappers (loopback-only HTTP for dev debug; stdio is the prod path).                                                                                                                                                                                                          |
+| `src/accounts.ts`     | Xeni                 | Runtime agent-account loader + cold-key WARN.                                                                                                                                                                                                                                                                  |
+| `src/logger.ts`       | Xeni                 | Structured logger (correlation-ID-aware).                                                                                                                                                                                                                                                                      |
+| `src/plugins/xeniRead/` | Xeni               | The **single Xeni-authored MCP tool** — `get_treasury_allowance_remaining` (Mirror Node REST wrapper). 3 files: `mirrorNode.ts`, `getTreasuryAllowanceRemaining.ts`, `index.ts`.                                                                                                                              |
+| `scripts/`            | Xeni                 | Standalone bootstrap scripts (M3 audit topic + M4 treasury) and the Mirror Node pre-flight smoke-check. Anand-run, never on server startup.                                                                                                                                                                    |
+| `reference-impl/`     | Xeni (TS specs only) | Reference implementations of the AgentService-side guards (`auditEnvelopeBuilder`, `mandateBudgetGuard`, `spendPolicyGuard`, `treasuryAllowanceGuard`, `accountResolver`, `hbar` helpers) + 68 unit tests. **Not registered on the runtime toolkit** — these are executable behavioral specs the Go port must match. |
+| `test/unit/`, `test/integration/`, `test/e2e/` | Xeni | 278 tests across unit (mocked-fetch logic), integration (real `buildToolkit`), and E2E (real Hedera testnet). 99.57% statement coverage.                                                                                                                                |
+| `docs/`               | Xeni                 | DESIGN.md, DESIGN_DEPENDENCIES.md, RUNBOOKS.md, HANDOVER_TO_AGENT_SERVICE.md, XENI_LAYER.md.                                                                                                                                                                                                                   |
+| `package.json` (deps) | Xeni (config only)   | Pins exact versions of `@hashgraph/hedera-agent-kit`, `@hashgraph/hedera-agent-kit-mcp`, `@hiero-ledger/sdk`. **No forks, no patches** of those packages — we consume published versions verbatim.                                                                                                              |
+| `node_modules/@hashgraph/...` + `node_modules/@hiero-ledger/...` | upstream (community) | The Hedera agent kit + MCP toolkit + Hiero SDK. Read-only at runtime; never modified by us.                                                                                                                                                                                |
+
+**Xeni-authored line count is small** — most of the value is the upstream agent kit. Concretely: ~120 lines of server bootstrap + ~250 lines of the one read tool + ~700 lines of bootstrap scripts + ~1200 lines of `reference-impl/` specs (executable Go-port spec, not runtime code) + tests + docs.
+
 ## Documentation
 
 - **[docs/DESIGN.md](docs/DESIGN.md)** — v1 architecture, account model, money flow, audit durability, migration & cutover, testing strategy
 - **[docs/DESIGN_DEPENDENCIES.md](docs/DESIGN_DEPENDENCIES.md)** — upstream features we rely on + version-pinning rationale
 - **[docs/RUNBOOKS.md](docs/RUNBOOKS.md)** — ops procedures: treasury replenishment, cap-hit UX, dead-letter response, smoke test
+- **[docs/XENI_LAYER.md](docs/XENI_LAYER.md)** — single-doc inventory of what Xeni added on top of upstream + the dynamic HBAR↔fiat conversion convention
+- **[docs/HANDOVER_TO_AGENT_SERVICE.md](docs/HANDOVER_TO_AGENT_SERVICE.md)** — Go-port spec for the AgentService-side guards (uses `reference-impl/` as the live behavioral spec)
 
 ## Coordination with other buddies
 
