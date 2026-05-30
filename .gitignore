@@ -15,6 +15,9 @@ node_modules/
 .env.testnet-ci
 .env.testnet-uat
 .env.mainnet-prod
+# Bootstrap env files (operator + treasury cold keys; used by M3/M4/M5 scripts)
+.env.bootstrap
+.env.bootstrap.*
 *.key
 *.pem
 
