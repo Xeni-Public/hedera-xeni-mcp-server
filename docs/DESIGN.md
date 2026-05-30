@@ -252,7 +252,7 @@ Per-message HCS fee ~$0.0002 (300-byte payload). At 10k bookings/day × ~5 event
 
 ## 11. Out of scope for v1 / deferred
 
-- **Phase 2:** HTS / USDC / stablecoin allowances & transfers; auto-top-up of refund allowance; reconciliation worker for MCP-crash-between-transfer-and-response (known gap, §13); local DB mirror index for audit queries.
+- **Phase 2:** HTS / USDC / stablecoin allowances & transfers — **design locked in [USDC_DESIGN.md](USDC_DESIGN.md)** (2026-04-28); auto-top-up of refund allowance; reconciliation worker for MCP-crash-between-transfer-and-response (known gap, §13); local DB mirror index for audit queries.
 - **Phase 3:** HCS-listener-triggered booking flow.
 - **Phase 4:** On-chain supplier settlement; on-chain customer commission payout.
 - **Phase 5:** Customer-is-MoR flows (invoice + prepaid deposit); per-customer audit topics.
