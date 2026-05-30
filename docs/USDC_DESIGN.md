@@ -83,8 +83,8 @@ Hedera Service IDs differ per network:
 
 | Network | USDC token ID | Source of truth |
 |---|---|---|
-| testnet | `0.0.429274` | Circle's testnet USDC; verify at design-lock time via Mirror Node `/api/v1/tokens/{id}` |
-| mainnet | `0.0.456858` | Circle's mainnet USDC; verify at design-lock time |
+| testnet | `0.0.429274` | Circle's testnet USDC; verify at design-lock time via Mirror Node `/api/v1/tokens/{id}` (see [§13 L1 — pending verification](#13-open-follow-ups-for-design-lock-time-verification)) |
+| mainnet | `0.0.456858` | Circle's mainnet USDC; verify at design-lock time (see [§13 L1 — pending verification](#13-open-follow-ups-for-design-lock-time-verification)) |
 
 > **Verify-before-trust rule.** Hardcoded IDs from public docs MUST be confirmed against live Mirror Node responses at design-lock time. Issue #18 (the broken endpoint) taught us this lesson; same discipline applies to Circle's published token IDs.
 
@@ -120,7 +120,7 @@ export function invalidNumberReason(value: unknown, name: string): string | null
 
 Mirrors `hbar.ts`'s API surface exactly — same `invalidNumberReason` shape so AgentService's Go port has parallel structure.
 
-**Number safety:** USDC max supply is bounded by Circle's mint cap (~$25B mainnet). Max micro-USDC ≈ 2.5×10¹⁶ — comfortably within `Number.MAX_SAFE_INTEGER` (≈9×10¹⁵... actually beyond). **Use `bigint` internally for amounts**, convert to `number` only at JSON boundaries with explicit precision-loss accept (string `amount_decimal` field carries the safe value; see §9).
+**Number safety:** USDC max supply is bounded by Circle's mint cap (~$25B mainnet). Max micro-USDC ≈ 2.5×10¹⁶ — **exceeds** `Number.MAX_SAFE_INTEGER` (~9×10¹⁵), so `bigint` internally is **mandatory** (not precautionary). Convert to `number` only at JSON boundaries with explicit precision-loss accept (string `amount_decimal` field carries the safe value; see §9).
 
 ## 8. NEW — Fee delegation per wallet
 
@@ -226,7 +226,9 @@ Bump schema from v1 to **v2** to carry currency information. Backward-compatible
 ```
 
 **Backward-compat rules:**
-- v1 HBAR events: keep emitting `schema_version: 1` for at least 30 days post-v2 rollout, OR re-emit as v2 with `currency: "HBAR"`, `token_id: null`, `amount_token_units: <tinybar>`, `amount_decimal: <hbar-as-string>`.
+- v1 HBAR events — **choose one at rollout time** (both correct; ops picks based on backfill-job appetite):
+  - **(a) Deferred-cutover style:** keep emitting `schema_version: 1` for HBAR events for at least 30 days post-v2 rollout. Readers handle both v1 and v2 during the migration window. No backfill needed.
+  - **(b) Single-format cutover:** re-emit existing v1 HBAR events as v2 with `currency: "HBAR"`, `token_id: null`, `amount_token_units: <tinybar>`, `amount_decimal: <hbar-as-string>`. Requires a backfill job over the existing HCS history; single-format steady-state afterward.
 - v2 readers MUST handle both `schema_version: 1` and `schema_version: 2`.
 - AgentService outbox writer + AgentService HCS audit consumer both upgrade in the same release.
 
@@ -249,7 +251,7 @@ export interface GetTreasuryTokenAllowanceRemainingDeps {
 }
 
 export interface GetTreasuryTokenAllowanceRemainingResult {
-  remainingMicroTokenUnits: number;    // bigint serialized as Number (audit-safe range)
+  remainingMicroTokenUnits: number;    // Safe as Number because the daily cap (HEDERA_USDC_REFUND_DAILY_CAP_USDC) bounds the value well below 2^53. Compare §7 — without that env bound, this would require bigint.
   remainingDecimal: string;            // "1000.000000" — UI-renderable
   tokenId: string;
   ownerAccountId: string;
@@ -347,4 +349,4 @@ Explicit non-goals for v1 of USDC:
 
 - _Phase 2.1 PR: TBD_
 - _AgentService coordination issue: TBD_
-- _Frontend coordination issue: TBD (filed in parallel with this PR — see merge body)_
+- Frontend coordination issue: [ai-agent-web#144](https://github.com/xeni-app/ai-agent-web/issues/144) — wallet integration (HashPack + MetaMask), currency selection UX, USDC display + logo, EIP-2612 permit flow
